@@ -43,7 +43,7 @@ namespace Singular.ClassSpecific.Monk
                     Helpers.Common.CreateInterruptBehavior(),
 						//CD & defense
                     Spell.Cast("Invoke Xuen, the White Tiger", ret => Me.CurrentTarget.IsBoss()),
-                    Spell.Cast("Tigereye Brew", ret => Me.HasAura("Tigereye Brew", MonkSettings.TigerEyeStacks) || Unit.GetAuraStacks(Me, "Tigereye Brew") >= 5 && Me.HasAura(139120) && Me.GetAuraTimeLeft(139120).TotalSeconds < 2),
+                    Spell.Cast("Tigereye Brew", ret => Me.HasAura("Tigereye Brew", MonkSettings.TigerEyeStacks) || Unit.GetAuraStacks(Me, "Tigereye Brew") >= 5 && Me.HasAura(139120) && Me.GetAuraTimeLeft(139120).TotalSeconds < 2 && Me.GetAuraTimeLeft(116740).TotalSeconds < 5),
 					Spell.Cast("Energizing Brew", ret => Me.CurrentEnergy < 30),
 					Spell.Cast("Fortifying Brew", ret => Me.HealthPercent <= 35),
 					Spell.Cast("Touch of Karma", ret => Me.HealthPercent <= 45),
