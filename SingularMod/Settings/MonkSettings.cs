@@ -62,30 +62,35 @@ namespace Singular.Settings
         [Setting]
         [Styx.Helpers.DefaultValue(true)]
         [Category("Common")]
-        [DisplayName("AOE Stun")]
-        public bool AOEStun { get; set; }
-
-        [Setting]
-        [Styx.Helpers.DefaultValue(true)]
-        [Category("Common")]
-        [DisplayName("Paralysis")]
-        public bool Paralysis { get; set; }
-
-        [Setting]
-        [Styx.Helpers.DefaultValue(20)]
-        [Category("Common")]
-        [DisplayName("TigerEyeStacks")]
-        public int TigerEyeStacks { get; set; }
-
-        [Setting]
-        [Styx.Helpers.DefaultValue(false)]
-        [Category("Common")]
-        [DisplayName("PVP")]
-        public bool PVP { get; set; }
+        [DisplayName("Rune of Re-Origination - Set to false if you dont have this trinket equipped")]
+        public bool ReOrigination { get; set; }
 
         #endregion
 
+		#region PVP
+
+		[Setting]
+		[Styx.Helpers.DefaultValue(false)]
+		[Category("PVP Stuffs")]
+		[DisplayName("PVP Rotation")]
+		public bool PVP { get; set; }
+
+		[Setting]
+		[Styx.Helpers.DefaultValue(true)]
+		[Category("PVP Stuffs")]
+		[DisplayName("Paralysis - Paralysis on nearby enemy player")]
+		public bool Paralysis { get; set; }
+
+
+		#endregion
+
         #region Brewmaster
+
+		[Setting]
+		[Styx.Helpers.DefaultValue(true)]
+		[Category("Brewmaster")]
+		[DisplayName("AOE Stun")]
+		public bool AOEStun { get; set; }
 
         [Setting]
         [Styx.Helpers.DefaultValue(70)]
