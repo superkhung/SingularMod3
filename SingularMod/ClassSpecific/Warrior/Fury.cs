@@ -68,6 +68,8 @@ namespace Singular.ClassSpecific.Warrior
 
                     Spell.Cast("Heroic Strike", ret => NeedHeroicStrike),
                     Spell.Cast("Wild Strike", ret => !WithinExecuteRange && Me.HasAura("Bloodsurge")),
+                    Spell.Cast("Wild Strike", ret => !WithinExecuteRange && TargetSmashed && BTCD.TotalSeconds >= 1 && Me.RagePercent >= 50 || !WithinExecuteRange && BTCD.TotalSeconds >= 1 && CSCD.TotalSeconds >= 1.6 && Me.CurrentRage >= 70),
+                    //Spell.Cast(Common.SelectedShout, ret => !TargetSmashed && Me.CurrentRage < 70),
                     Spell.Cast("Battle Shout", ret => Me.CurrentRage < 60)
                 )
         	);
