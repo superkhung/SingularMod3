@@ -39,28 +39,28 @@ namespace Singular.ClassSpecific.Warrior
                     Spell.Cast("Impending Victory", ret => Me.HealthPercent < 90 && Me.HasAura("Victorious")),
                     Spell.Cast("Die by the Sword", ret => Me.HealthPercent <= 30),
                     Spell.Cast("Rallying Cry", ret => Me.HealthPercent <= 20),
+                    //Handle selfbuff
+                    Spell.BuffSelf("Berserker Rage", ret => !IsEnraged && Me.CurrentTarget.IsWithinMeleeRange),
+                    Spell.BuffSelf("Bloodbath", ret => Me.CurrentTarget.IsWithinMeleeRange),
+                    Spell.BuffSelf("Skull Banner", ret => WithinExecuteRange && Unit.IsBoss(Me.CurrentTarget)),
+                    //Only use Recklessness on Execute phase
+                    Spell.BuffSelf("Recklessness", ret => WithinExecuteRange && Unit.IsBoss(Me.CurrentTarget)),
 
 				    //Bloodthurst use on CD but only use to build rage on Execute phase
-                    Spell.Cast("Bloodthirst", ret => Me.CurrentTarget.IsWithinMeleeRange),
-                    Spell.Cast("Colossus Smash", ret => Me.CurrentTarget.IsWithinMeleeRange),
+                    Spell.Cast("Bloodthirst"),
+                    Spell.Cast("Colossus Smash"),
                     Spell.Cast
                     (
                         "Whirlwind", ret =>
                             //Get 3 stack Meat Cleaver for Raging Blow to hit 4 targets if more than 3 targets nearby
-                        Me.CurrentRage >= 30 && Unit.NearbyUnfriendlyUnits.Count(u => u.IsWithinMeleeRange) >= 4 && !Me.HasAura("Meat Cleaver", 3) ||
+                        Me.CurrentRage >= 30 && Unit.UnfriendlyUnitsNearTarget(8f).Count() >= 4 && !Me.HasAura("Meat Cleaver", 3) ||
                             //Get 2 stack Meat Cleaver for Raging Blow to hit 3 targets if 3 targets nearby
-                        Me.CurrentRage >= 30 && Unit.NearbyUnfriendlyUnits.Count(u => u.IsWithinMeleeRange) == 3 && !Me.HasAura("Meat Cleaver", 2) ||
+                        Me.CurrentRage >= 30 && Unit.UnfriendlyUnitsNearTarget(8f).Count() >= 3 && !Me.HasAura("Meat Cleaver", 2) ||
                             //Get 1 stack Meat Cleaver for Raging Blow to hit 2 targets if 2 targets nearby
-                        Me.CurrentRage >= 30 && Unit.NearbyUnfriendlyUnits.Count(u => u.IsWithinMeleeRange) == 2 && !Me.HasAura("Meat Cleaver")
+                        Me.CurrentRage >= 30 && Unit.UnfriendlyUnitsNearTarget(8f).Count() >= 2 && !Me.HasAura("Meat Cleaver")
                     ),
 
-                    Spell.Cast("Raging Blow", ret => Me.CurrentTarget.IsWithinMeleeRange),
-				    //Handle selfbuff
-                    Spell.BuffSelf("Berserker Rage", ret => !IsEnraged && Me.CurrentTarget.IsWithinMeleeRange),
-                    Spell.BuffSelf("Bloodbath", ret => Me.CurrentTarget.IsWithinMeleeRange),
-                    Spell.BuffSelf("Skull Banner", ret => WithinExecuteRange && Unit.IsBoss(Me.CurrentTarget)),
-				    //Only use Recklessness on Execute phase
-                    Spell.BuffSelf("Recklessness", ret => WithinExecuteRange && Unit.IsBoss(Me.CurrentTarget)),
+                    Spell.Cast("Raging Blow"),
 
 				    //Spam Execute on Execute phase
                     Spell.Cast("Execute", ret => WithinExecuteRange),
@@ -68,7 +68,7 @@ namespace Singular.ClassSpecific.Warrior
 
                     Spell.Cast("Heroic Strike", ret => NeedHeroicStrike),
                     Spell.Cast("Wild Strike", ret => !WithinExecuteRange && Me.HasAura("Bloodsurge")),
-                    Spell.Cast("Wild Strike", ret => !WithinExecuteRange && TargetSmashed && BTCD.TotalSeconds >= 1 && Me.RagePercent >= 50 || !WithinExecuteRange && BTCD.TotalSeconds >= 1 && CSCD.TotalSeconds >= 1.6 && Me.CurrentRage >= 70),
+                    Spell.Cast("Wild Strike", ret => !WithinExecuteRange && TargetSmashed && BTCD.TotalSeconds >= 1 && Me.RagePercent >= 60),
                     //Spell.Cast(Common.SelectedShout, ret => !TargetSmashed && Me.CurrentRage < 70),
                     Spell.Cast("Battle Shout", ret => Me.CurrentRage < 60)
                 )
@@ -110,11 +110,9 @@ namespace Singular.ClassSpecific.Warrior
                 {
                     var myRage = Me.RagePercent;
 
-                    if (myRage >= 45 && TargetSmashed)
+                    if (myRage >= 40 && TargetSmashed)
                         return true;
                     if (myRage >= 90)
-                        return true;
-                    if (myRage >= 40 && Me.HasAura("Deadly Calm"))
                         return true;
                 }
                 return false;
