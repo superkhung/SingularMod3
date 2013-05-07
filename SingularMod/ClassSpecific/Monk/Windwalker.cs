@@ -12,8 +12,6 @@ using Rest = Singular.Helpers.Rest;
 using Singular.Settings;
 using Styx.WoWInternals;
 
-//Storm, Earth, and Fire (137639)
-
 namespace Singular.ClassSpecific.Monk
 {
     public class Windwalker
@@ -46,8 +44,8 @@ namespace Singular.ClassSpecific.Monk
 						//CD & defense
                     Spell.Cast("Invoke Xuen, the White Tiger", ret => Me.CurrentTarget.IsBoss()),
 					Spell.Cast("Tigereye Brew", ret => !MonkSettings.ReOrigination && Unit.GetAuraStacks(Me, "Tigereye Brew") >= 10 ||
-			           MonkSettings.ReOrigination && Unit.GetAuraStacks(Me, "Tigereye Brew") >= 18 || 
-			           Unit.GetAuraStacks(Me, "Tigereye Brew") >= 2 && Me.HasAura(ReOriginationMastery) && Me.GetAuraTimeLeft(ReOriginationMastery).TotalSeconds <= 2),
+			           MonkSettings.ReOrigination && Unit.GetAuraStacks(Me, "Tigereye Brew") >= 18 ||
+                       Unit.GetAuraStacks(Me, "Tigereye Brew") >= 2 && Me.HasAura(ReOriginationMastery) && Me.GetAuraTimeLeft(ReOriginationMastery).TotalMilliseconds <= 1500),
 					Spell.Cast("Energizing Brew", ret => Me.CurrentEnergy < 30),
 					Spell.Cast("Fortifying Brew", ret => Me.HealthPercent <= 35),
 					Spell.Cast("Touch of Karma", ret => Me.HealthPercent <= 45),
