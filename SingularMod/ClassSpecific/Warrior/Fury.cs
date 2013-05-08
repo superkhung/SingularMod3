@@ -47,17 +47,18 @@ namespace Singular.ClassSpecific.Warrior
                     Spell.BuffSelf("Recklessness", ret => WithinExecuteRange && Unit.IsBoss(Me.CurrentTarget)),
 
 				    //Bloodthurst use on CD but only use to build rage on Execute phase
+                    Spell.Cast("Heroic Strike", ret => NeedHeroicStrike),
                     Spell.Cast("Bloodthirst", ret => Me.CurrentTarget.IsWithinMeleeRange),
                     Spell.Cast("Colossus Smash", ret =>  BTCD.TotalSeconds >= 1 && Me.CurrentTarget.IsWithinMeleeRange),
                     Spell.Cast
                     (
                         "Whirlwind", ret =>
                             //Get 3 stack Meat Cleaver for Raging Blow to hit 4 targets if more than 3 targets nearby
-                        CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && Me.CurrentRage >= 30 && Unit.UnfriendlyUnitsNearTarget(8f).Count() >= 4 && !Me.HasAura("Meat Cleaver", 3) ||
+                        CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && Me.CurrentRage >= 30 && Unit.NearbyUnfriendlyUnits.Count(u => u.Distance <= 8) >= 4 && !Me.HasAura("Meat Cleaver", 3) ||
                             //Get 2 stack Meat Cleaver for Raging Blow to hit 3 targets if 3 targets nearby
-                        CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && Me.CurrentRage >= 30 && Unit.UnfriendlyUnitsNearTarget(8f).Count() >= 3 && !Me.HasAura("Meat Cleaver", 2) ||
+                        CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && Me.CurrentRage >= 30 && Unit.NearbyUnfriendlyUnits.Count(u => u.Distance <= 8) >= 3 && !Me.HasAura("Meat Cleaver", 2) ||
                             //Get 1 stack Meat Cleaver for Raging Blow to hit 2 targets if 2 targets nearby
-                        CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && Me.CurrentRage >= 30 && Unit.UnfriendlyUnitsNearTarget(8f).Count() >= 2 && !Me.HasAura("Meat Cleaver")
+                        CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && Me.CurrentRage >= 30 && Unit.NearbyUnfriendlyUnits.Count(u => u.Distance <= 8) >= 2 && !Me.HasAura("Meat Cleaver")
                     ),
 
                     Spell.Cast("Raging Blow", ret => CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && Me.CurrentTarget.IsWithinMeleeRange && !WithinExecuteRange),
@@ -66,11 +67,11 @@ namespace Singular.ClassSpecific.Warrior
                     Spell.Cast("Execute", ret => CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && WithinExecuteRange),
                     Spell.Cast("Dragon Roar", ret => Me.CurrentTarget.IsWithinMeleeRange),
 
-                    Spell.Cast("Heroic Strike", ret => NeedHeroicStrike && !WithinExecuteRange),
+                    Spell.Cast("Heroic Throw", ret => TargetSmashed),
                     Spell.Cast("Wild Strike", ret => CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && !WithinExecuteRange && Me.HasAura("Bloodsurge")),
                     //Spell.Cast("Wild Strike", ret => !WithinExecuteRange && TargetSmashed && BTCD.TotalSeconds >= 1 && Me.RagePercent >= 70),
                     //Spell.Cast(Common.SelectedShout, ret => !TargetSmashed && Me.CurrentRage < 70),
-                    Spell.Cast("Battle Shout", ret => Me.CurrentRage < 60)
+                    Spell.Cast("Battle Shout", ret => Me.CurrentRage < 40)
                 )
         	);
         }
@@ -110,9 +111,9 @@ namespace Singular.ClassSpecific.Warrior
                 {
                     var myRage = Me.RagePercent;
 
-                    if (myRage >= 40 && TargetSmashed)
+                    if (myRage >= 34 && TargetSmashed)
                         return true;
-                    if (myRage >= 100)
+                    if (myRage >= 88)
                         return true;
                 }
                 return false;
