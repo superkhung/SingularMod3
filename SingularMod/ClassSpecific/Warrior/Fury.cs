@@ -67,8 +67,8 @@ namespace Singular.ClassSpecific.Warrior
                     Spell.Cast("Execute", ret => CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && WithinExecuteRange),
                     Spell.Cast("Dragon Roar", ret => Me.CurrentTarget.IsWithinMeleeRange),
 
-                    Spell.Cast("Heroic Throw", ret => TargetSmashed),
-                    Spell.Cast("Wild Strike", ret => CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && !WithinExecuteRange && Me.HasAura("Bloodsurge")),
+                    Spell.Cast("Heroic Throw", ret => TargetSmashed && !WithinExecuteRange),
+                    Spell.Cast("Wild Strike", ret => CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && !WithinExecuteRange && Me.HasAura("Bloodsurge") && !WithinExecuteRange),
                     //Spell.Cast("Wild Strike", ret => !WithinExecuteRange && TargetSmashed && BTCD.TotalSeconds >= 1 && Me.RagePercent >= 70),
                     //Spell.Cast(Common.SelectedShout, ret => !TargetSmashed && Me.CurrentRage < 70),
                     Spell.Cast("Battle Shout", ret => Me.CurrentRage < 40)
