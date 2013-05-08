@@ -65,6 +65,12 @@ namespace Singular.Settings
         [DisplayName("Rune of Re-Origination - Set to false if you dont have this trinket equipped")]
         public bool ReOrigination { get; set; }
 
+        [Setting]
+        [Styx.Helpers.DefaultValue(1200)]
+        [Category("Common")]
+        [DisplayName("Rune of Re-Origination - Time left to use tigereye brew (ms)")]
+        public int ReOriginationProcTime { get; set; }
+
         #endregion
 
 		#region PVP

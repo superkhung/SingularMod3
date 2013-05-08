@@ -60,13 +60,13 @@ namespace Singular.ClassSpecific.Warrior
                         CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && Me.CurrentRage >= 30 && Unit.UnfriendlyUnitsNearTarget(8f).Count() >= 2 && !Me.HasAura("Meat Cleaver")
                     ),
 
-                    Spell.Cast("Raging Blow", ret => CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && Me.CurrentTarget.IsWithinMeleeRange),
+                    Spell.Cast("Raging Blow", ret => CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && Me.CurrentTarget.IsWithinMeleeRange && !WithinExecuteRange),
 
 				    //Spam Execute on Execute phase
                     Spell.Cast("Execute", ret => CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && WithinExecuteRange),
                     Spell.Cast("Dragon Roar", ret => Me.CurrentTarget.IsWithinMeleeRange),
 
-                    Spell.Cast("Heroic Strike", ret => NeedHeroicStrike),
+                    Spell.Cast("Heroic Strike", ret => NeedHeroicStrike && !WithinExecuteRange),
                     Spell.Cast("Wild Strike", ret => CSCD.TotalSeconds >= 1 && BTCD.TotalSeconds >= 1 && !WithinExecuteRange && Me.HasAura("Bloodsurge")),
                     //Spell.Cast("Wild Strike", ret => !WithinExecuteRange && TargetSmashed && BTCD.TotalSeconds >= 1 && Me.RagePercent >= 70),
                     //Spell.Cast(Common.SelectedShout, ret => !TargetSmashed && Me.CurrentRage < 70),
