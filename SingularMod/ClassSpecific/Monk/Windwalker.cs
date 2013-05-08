@@ -82,7 +82,7 @@ namespace Singular.ClassSpecific.Monk
                 Spell.WaitForCastOrChannel(),
 				//cc & interrupt stuff
                 Helpers.Common.CreateInterruptBehavior(),
-				Spell.Cast("Paralysis", ret => Unit.NearbyUnfriendlyUnits.FirstOrDefault(u => u.IsPlayer && u.Distance.Between(8, 20) && Me.IsFacing(u) && u.Guid != Me.CurrentTarget.Guid && MonkSettings.Paralysis)),
+				Spell.Cast("Paralysis", ret => Unit.NearbyUnfriendlyUnits.FirstOrDefault(u => u.IsPlayer && u.Distance.Between(4, 20) && Me.IsFacing(u) && u.Guid != Me.CurrentTarget.Guid && MonkSettings.Paralysis)),
                 Spell.Cast("Quaking Palm", ret => Unit.NearbyUnfriendlyUnits.FirstOrDefault(u => u.IsPlayer && u.IsWithinMeleeRange && Me.IsFacing(u) && !u.HasAura("Paralysis") && u != Me.CurrentTarget)),
                 Spell.Cast("Spear Hand Strike", ret => Unit.NearbyUnfriendlyUnits.FirstOrDefault(u => u.IsPlayer && u.IsWithinMeleeRange && Me.IsFacing(u) && u.IsCastingHealingSpell)),
 				
