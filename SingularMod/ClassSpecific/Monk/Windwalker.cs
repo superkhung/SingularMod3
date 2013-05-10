@@ -58,14 +58,13 @@ namespace Singular.ClassSpecific.Monk
 					Spell.Cast("Rising Sun Kick", ret => Me.CurrentChi >= 2),
                     Spell.Cast("Fists of Fury", ret => Me.CurrentChi >= 3 && Me.CurrentEnergy < 60 && !Me.IsMoving && Me.HasAura("Tiger Power") && !Me.HasAura("Energizing Brew") && Me.HasAura(TigereyeBrewBuff) ||
                        !Me.HasAura(ReOriginationMastery) && Me.CurrentChi >= 3 && Me.CurrentEnergy < 30 && !Me.IsMoving && Me.HasAura("Tiger Power") && !Me.HasAura("Energizing Brew")),
-					
-					new Decorator( ret => !Spell.IsGlobalCooldown() && Unit.NearbyUnfriendlyUnits.Count(u => u.Distance <= 8) >= SingularSettings.Instance.AOENumber,
-					 new PrioritySelector
-					 (
+
+                    new Decorator(ret => !Spell.IsGlobalCooldown() && Unit.NearbyUnfriendlyUnits.Count(u => u.Distance <= 8) >= SingularSettings.Instance.AOENumber && !Me.HasAura(ReOriginationMastery),
+					new PrioritySelector
+					(
                         Spell.Cast("Rising Sun Kick", ret => Me.CurrentChi >= 2),
-						Spell.Cast("Spinning Crane Kick", ret => Me.CurrentEnergy >= 40)
-						)
-					 ),
+					    Spell.Cast("Spinning Crane Kick", ret => Me.CurrentEnergy >= 40)
+					)),
 
                     Spell.Cast("Blackout Kick", ret => Me.CurrentChi >= 2 && Spell.GetSpellCooldown("Rising Sun Kick").Seconds > 1 && Me.HasAura("Tiger Power") || Spell.GetSpellCooldown("Rising Sun Kick").Seconds > 1 && Me.HasAura("Combo Breaker: Blackout Kick") && Me.HasAura("Tiger Power")),
 					
