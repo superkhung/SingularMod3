@@ -45,7 +45,7 @@ namespace Singular.ClassSpecific.Monk
                     Spell.Cast("Invoke Xuen, the White Tiger", ret => Me.CurrentTarget.IsBoss()),
 					Spell.Cast("Tigereye Brew", ret => !MonkSettings.ReOrigination && Unit.GetAuraStacks(Me, "Tigereye Brew") >= 10 ||
 			           MonkSettings.ReOrigination && Unit.GetAuraStacks(Me, "Tigereye Brew") >= 18 ||
-                       Unit.GetAuraStacks(Me, "Tigereye Brew") >= 2 && Me.HasAura(ReOriginationMastery) && Me.GetAuraTimeLeft(ReOriginationMastery).TotalMilliseconds <= MonkSettings.ReOriginationProcTime),
+                       Unit.GetAuraStacks(Me, "Tigereye Brew") >= 4 && Me.HasAura(ReOriginationMastery) && Me.GetAuraTimeLeft(ReOriginationMastery).TotalMilliseconds <= MonkSettings.ReOriginationProcTime),
 					Spell.Cast("Energizing Brew", ret => Me.CurrentEnergy < 30),
 					Spell.Cast("Fortifying Brew", ret => Me.HealthPercent <= 35),
 					Spell.Cast("Touch of Karma", ret => Me.HealthPercent <= 45),
