@@ -97,7 +97,7 @@ namespace Singular.Lists
         // this list should only contain bosses that are not found in 5 mans and raids.
         private static HashSet<uint> _bosses = new HashSet<uint>
                     {
-                        /*
+                        
                         //Ragefire Chasm
                         11517, //Oggleflint
                         11520, //Taragaman the Hungerer
@@ -1198,24 +1198,140 @@ namespace Singular.Lists
                         56167, // Arm Tentacle -- Madness of DW
                         56168, // Wing Tentacle - Madness of DW
                         57962, // Deathwing ----- Madness of DW (his head)
+                        56575, // Burning Tendons
+                        56341, // Burning Tendons
 
-                        // === Pandaria 5-man Dungeons
-                        // Gate of the Setting Sun	      
-                        // Mogu'shan Palace	          
-                        // Scarlet Halls	              
-                        // Scarlet Monastery	          
-                        // Scholomance	                  
-                        // Shado-Pan Monastery	          
-                        // Siege of Niuzao Temple	      
-                        // SM Cathedral/GY               
-                        // Stormstout Brewery	          
-                        // Temple of the Jade Serpent
+                        56710, // Elementium terror
+                        56262, // Elementium bolt
+                        56471, // Mutated Corruption
 
-                        // === Pandaria Raids
-                        // Heart of Fear	            
-                        // Mogu'shan Vaults	        
+                        // Patch 5.0 - MoP Bosses ============================
+
+                        // Temple of the Jade Serpent http://mop.wowhead.com/zone=5956#npcs
+                        56448, // Wise Mari <Waterspeaker>
+                        58826, // Zao Sunseeker <Champion of the Five Suns>
+                        59051, // Strife
+                        59726, // Peril
+                        56732, // Liu Flameheart <Priestess of the Jade Serpent>
+                        56762, // Yu'lon <The Jade Serpent>
+                        56439, // Sha of Doubt
+
+                        // Stormstout Brewery http://mop.wowhead.com/zone=5963#npcs
+                        56637, // Ook-Ook
+                        56717, // Hoptallus
+                        59479, // Yan-Zhu the Uncasked
+
+                        // Shado-Pan Monastery http://mop.wowhead.com/zone=5918#npcs
+                        56747, // Gu Cloudstrike
+                        56754, // Azure Serpent, Phase 2 of Gu Cloudstrike
+                        56541, // Master Snowdrift
+                        56719, // Sha of Violence
+                        56884, // Taran Zhu <Lord of the Shado-Pan>
+
+                        // Gate of the Setting Sun http://mop.wowhead.com/zone=5976#npcs
+                        56906, // Saboteur Kip'tilak
+                        56589, // Striker Ga'dok
+                        56636, // Commander Ri'mok
+                        61177, // Raigonn
+                        56877, // Raigonn
+                        56895, // Raigonn
+
+                        // Mogu'shan Palace http://www.wowhead.com/zone=6182
+                        61442, // Kuai the Brute
+                        61444, // Ming the Cunning
+                        61445, // Haiyan the Unstoppable
+                        61243, // Gekkan
+                        61337, // Glintrok Ironhide
+                        61338, // Glintrok Skulker
+                        61339, // Glintrok Oracle
+                        61340, // Glintrok Hexxer
+                        61398, // Xin the Weaponmaster <King of the Clans>
+
+                        // Siege of Niuzao Temple http://mop.wowhead.com/zone=6214#npcs
+                        61567, // Vizier Jin'bak
+                        61634, // Commander Vo'jak
+                        61485, // General Pa'valak
+                        62205, // Wing Leader Ner'onok
+
+                        // Scarlet Halls http://www.wowhead.com/zone=6052
+                        59303, // Houndsmaster Braun
+                        58632, // Armsmaster Harlan
+                        59150, // Flameweaver Koegler
+
+                        // Scarlet Monastry http://www.wowhead.com/zone=6109
+                        59789, // Thalnos the Soulrender
+                        59223, // Brother Korloff
+                        3977, // High Inquisitor Whitemane
+                        60040, // Commander Durand
+                        59191, // Commander Lindon
+                        59303, // Houndmaster Braun
+
+                        // Scholomance http://www.wowhead.com/zone=6066
+                        58633, // Instructor Chillheart
+                        59184, // Jandice Barov
+                        59153, // Rattlegore
+                        58722, // Lilian Moss
+                        59080, // Darkmaster Gandling
+                        59359, // Flesh Horror
+                        59193, // Boneweaver
+
+                        // POSSIBLE DUNGEONS
+                        // Crypt of Forgotten Kings
+                        // The Perfect Storm
+                        // Temple of the Red Crane
+                        // Temple of the White Tiger
+
+                        // Mogu'shan Vaults
+                        60047, // Amethyst Guardian
+                        60051, // Cobalt Guardian
+                        60043, // Jade Guardian
+                        59915, // Jasper Guardian
+                        60009, // Feng the Accursed <Keeper of Champion Spirits>
+                        60143, // Gara'jal the Spiritbinder
+                        61429, // Meng the Demented <Mad King>
+                        61421, // Zian of the Endless Shadow
+                        61423, // Qiang the Merciless
+                        61427, // Subetai the Swift
+                        60410, // Elegon
+                        60400, // Jan-xi <Emperor's Open Hand>
+                        60399, // Qin-xi
+
+                        // Heart of Fear
+                        66791, // Imperial Vizier Zor'lok <Voice of the Empress>
+                        62543, // Blade Lord Ta'yak
+                        62164, // Garalon
+                        65501, // Wind Lord Mel'jarak
+                        63666, // Amber-Shaper Un'sok
+                        62837, // Grand Empress Shek'zeer
+
                         // Terrace of Endless Spring
-                         */
+                        60583, // Protector Kaolan
+                        60586, // Elder Asani
+                        60585, // Elder Regail
+                        60491, // Sha of Anger
+                        62346, // Galleon
+                        62442, // Tsulong
+                        63099, // Lei Shi
+                        60999, // Sha of Fear
+
+                        // Throne of Thunder (5.2)
+                        69465, // Jin'rokh the Breaker
+                        68476, // Horridon
+                        69131, // Council of Elders
+                        69132, // Council of Elders
+                        69134, // Council of Elders
+                        69078, // Council of Elders
+                        67977, // Tortos
+                        70229, // Megaera
+                        70250, // Megaera
+                        70251, // Megaera
+                        69712, // Ji-Kun
+                        68036, // Durumu the Forgotten
+                        69017, // Primordius
+                        68078, // Iron Qon
+                        68905, // Twin Consorts
+                        68904  // Twin Consorts
+                        
                     };
 
         #endregion

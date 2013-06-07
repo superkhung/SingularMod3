@@ -194,7 +194,7 @@ namespace Singular.ClassSpecific.Shaman
 
                     Spell.BuffSelf("Searing Totem",
                         ret => Me.GotTarget
-                            && Me.CurrentTarget.Distance < GetTotemRange(WoWTotem.Searing) - 2f
+                            && Me.CurrentTarget.Distance < GetTotemRange(WoWTotem.Searing) - 2f && !Totems.Exist(WoWTotemType.Fire)
                             )
                     );
 

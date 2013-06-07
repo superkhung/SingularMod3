@@ -315,7 +315,8 @@ namespace Singular.ClassSpecific.Shaman
                         // Spell.BuffSelf("Spiritwalker's Grace", ret => StyxWoW.Me.IsMoving && StyxWoW.Me.Combat),
                         Spell.BuffSelf("Feral Spirit", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
                         Spell.BuffSelf("Ascendance", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
-                        //Spell.BuffSelf("Fire Elemental Totem", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        Spell.BuffSelf("Elemental Mastery", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        Spell.BuffSelf("Fire Elemental Totem", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
                         new Decorator(
                             ret => Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 3,
                             new PrioritySelector(
@@ -337,14 +338,14 @@ namespace Singular.ClassSpecific.Shaman
                         Spell.Cast("Unleash Elements", ret => Common.HasTalent(ShamanTalents.UnleashedFury)),
                         Spell.Buff("Flame Shock", ret => StyxWoW.Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds <= 1),
                         Spell.Cast("Stormstrike"),
-                        Spell.Cast("Stormblast"),
+                        new Action(ret => Lua.DoString("RunMacroText(\"/Cast Stormblast\")")),
                         //Spell.Cast("Primal Strike", ret => !SpellManager.HasSpell("Stormstrike")),
                         
                         //Spell.Cast("Unleash Elements"),
                         Spell.Buff("Flame Shock", true, ret => StyxWoW.Me.HasAura("Unleash Flame")),
                         Spell.Cast("Earth Shock", ret => StyxWoW.Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds > 6),
                         //Spell.Cast("Lava Lash"),
-                        Spell.Cast("Lightning Bolt", ret => Unit.GetAuraStacks(StyxWoW.Me, "Maelstrom Weapon") >= 2 && Spell.GetSpellCooldown("Stormstrike").Seconds > 1 && Spell.GetSpellCooldown("Unleash Elements").Seconds > 1)
+                        Spell.Cast("Lightning Bolt", ret => Spell.GetSpellCooldown("Stormstrike").Seconds > 1 && Spell.GetSpellCooldown("Unleash Elements").Seconds > 1)
                     ))
 
                 //Movement.CreateMoveToMeleeBehavior(true)
