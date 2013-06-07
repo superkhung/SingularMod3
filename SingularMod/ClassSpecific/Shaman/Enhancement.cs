@@ -120,7 +120,7 @@ namespace Singular.ClassSpecific.Shaman
         }
 
         #endregion
-
+/*
         #region Normal Rotation
 
         [Behavior(BehaviorType.Pull, WoWClass.Shaman, WoWSpec.ShamanEnhancement, WoWContext.Normal)]
@@ -230,7 +230,7 @@ namespace Singular.ClassSpecific.Shaman
         }
 
         #endregion
-
+*/
         #region Battleground Rotation
 
         [Behavior(BehaviorType.Pull | BehaviorType.Combat, WoWClass.Shaman, WoWSpec.ShamanEnhancement, WoWContext.Battlegrounds)]
@@ -250,7 +250,7 @@ namespace Singular.ClassSpecific.Shaman
 
                         Helpers.Common.CreateAutoAttack(true),
                         Helpers.Common.CreateInterruptBehavior(),
-
+                        Totems.CreateTotemsBehavior(),
                         Common.CreateShamanImbueMainHandBehavior(Imbue.Windfury, Imbue.Flametongue),
                         Common.CreateShamanImbueOffHandBehavior(Imbue.Frostbrand, Imbue.Flametongue),
 
@@ -279,7 +279,7 @@ namespace Singular.ClassSpecific.Shaman
                             ),
 
                         Spell.Cast("Unleash Elements"),
-                        Spell.Buff("Flame Shock", true, ret => StyxWoW.Me.HasAura("Unleash Wind") || !SpellManager.HasSpell("Unleash Elements")),
+                        Spell.Buff("Flame Shock", true, ret => StyxWoW.Me.HasAura("Unleash Flame") || !SpellManager.HasSpell("Unleash Elements")),
                         Spell.Cast("Earth Shock", ret => StyxWoW.Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds > 6)
                         )
                     ),
@@ -291,22 +291,22 @@ namespace Singular.ClassSpecific.Shaman
         #endregion
 
         #region Instance Rotation
-        [Behavior(BehaviorType.Pull | BehaviorType.Combat, WoWClass.Shaman, WoWSpec.ShamanEnhancement, WoWContext.Instances)]
+        [Behavior(BehaviorType.Pull | BehaviorType.Combat, WoWClass.Shaman, WoWSpec.ShamanEnhancement, WoWContext.Instances | WoWContext.Normal)]
         public static Composite CreateShamanEnhancementInstancePullAndCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
+                //Safers.EnsureTarget(),
+                //Movement.CreateMoveToLosBehavior(),
+                //Movement.CreateFaceTargetBehavior(),
+                //Helpers.Common.CreateDismount("Pulling"),
                 Spell.WaitForCastOrChannel(),
-                Helpers.Common.CreateAutoAttack(true),
-
+                //Helpers.Common.CreateAutoAttack(true),
+                Totems.CreateTotemsBehavior(),
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown(),
                     new PrioritySelector(
 
-                        CreateEnhanceDiagnosticOutputBehavior(),
+                        //CreateEnhanceDiagnosticOutputBehavior(),
 
                         Helpers.Common.CreateInterruptBehavior(),
 
@@ -316,6 +316,11 @@ namespace Singular.ClassSpecific.Shaman
                         Spell.BuffSelf("Feral Spirit", ret =>
                             ShamanSettings.FeralSpiritCastOn == CastOn.All
                             || (ShamanSettings.FeralSpiritCastOn == CastOn.Bosses && StyxWoW.Me.CurrentTarget.IsBoss() )
+                            || (ShamanSettings.FeralSpiritCastOn == CastOn.Players && Unit.NearbyUnfriendlyUnits.Any(u => u.IsPlayer && u.Combat && u.IsTargetingMeOrPet))),
+
+                        Spell.BuffSelf("Ascendance", ret =>
+                            ShamanSettings.FeralSpiritCastOn == CastOn.All
+                            || (ShamanSettings.FeralSpiritCastOn == CastOn.Bosses && StyxWoW.Me.CurrentTarget.IsBoss())
                             || (ShamanSettings.FeralSpiritCastOn == CastOn.Players && Unit.NearbyUnfriendlyUnits.Any(u => u.IsPlayer && u.Combat && u.IsTargetingMeOrPet))),
 
                         new Decorator(
@@ -329,26 +334,24 @@ namespace Singular.ClassSpecific.Shaman
                                            StyxWoW.Me.Inventory.Equipped.OffHand.ItemInfo.ItemClass == WoWItemClass.Weapon),
                                 Spell.Cast("Fire Nova"),
                                 Spell.Cast("Chain Lightning", ret => StyxWoW.Me.HasAura("Maelstrom Weapon", 5)),
-                                Spell.Cast("Stormstrike"),
-                                Movement.CreateMoveToMeleeBehavior(true)
+                                Spell.Cast("Chain Lightning", ret => Unit.GetAuraStacks(StyxWoW.Me, "Maelstrom Weapon") >= 2 && Spell.GetSpellCooldown("Fire Nova").Seconds > 1 && Spell.GetSpellCooldown("Unleash Elements").Seconds > 1),
+                                Spell.Cast("Stormstrike")
+                                //Movement.CreateMoveToMeleeBehavior(true)
                                 )),
-
-                        Spell.Cast("Elemental Blast"),
-                        Spell.Cast("Unleash Elements", ret => Common.HasTalent(ShamanTalents.UnleashedFury)),
-
-                        Spell.Cast("Stormstrike"),
-                        Spell.Cast("Primal Strike", ret => !SpellManager.HasSpell("Stormstrike")),
-                        Spell.Cast("Lava Lash",
-                            ret => StyxWoW.Me.Inventory.Equipped.OffHand != null && 
-                                   StyxWoW.Me.Inventory.Equipped.OffHand.ItemInfo.ItemClass == WoWItemClass.Weapon),
                         Spell.Cast("Lightning Bolt", ret => StyxWoW.Me.HasAura("Maelstrom Weapon", 5)),
-                        Spell.Cast("Unleash Elements"),
-                        Spell.Buff("Flame Shock", true, ret => StyxWoW.Me.HasAura("Unleash Wind") || !SpellManager.HasSpell("Unleash Elements")),
-                        Spell.Cast("Earth Shock", ret => StyxWoW.Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds > 6)
-                        )
-                    ),
+                        //Spell.Cast("Elemental Blast"),
+                        Spell.Cast("Unleash Elements", ret => Common.HasTalent(ShamanTalents.UnleashedFury)),
+                        Spell.Buff("Flame Shock", ret => StyxWoW.Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds < 6),
+                        Spell.Cast("Stormstrike"),
+                        //Spell.Cast("Primal Strike", ret => !SpellManager.HasSpell("Stormstrike")),
+                        Spell.Cast("Lava Lash", ret => StyxWoW.Me.HasAura("Searing Flames", 5)),
+                        //Spell.Cast("Unleash Elements"),
+                        Spell.Buff("Flame Shock", true, ret => StyxWoW.Me.HasAura("Unleash Flame")),
+                        Spell.Cast("Earth Shock", ret => StyxWoW.Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds > 6),
+                        Spell.Cast("Lightning Bolt", ret => Unit.GetAuraStacks(StyxWoW.Me, "Maelstrom Weapon") >= 2 && Spell.GetSpellCooldown("Stormstrike").Seconds > 1 && Spell.GetSpellCooldown("Unleash Elements").Seconds > 1)
+                    ))
 
-                Movement.CreateMoveToMeleeBehavior(true)
+                //Movement.CreateMoveToMeleeBehavior(true)
                 );
         }
 
