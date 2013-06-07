@@ -295,13 +295,13 @@ namespace Singular.ClassSpecific.Shaman
         public static Composite CreateShamanEnhancementInstancePullAndCombat()
         {
             return new PrioritySelector(
-                //Safers.EnsureTarget(),
+                Safers.EnsureTarget(),
                 //Movement.CreateMoveToLosBehavior(),
                 //Movement.CreateFaceTargetBehavior(),
                 //Helpers.Common.CreateDismount("Pulling"),
                 Spell.WaitForCastOrChannel(),
-                //Helpers.Common.CreateAutoAttack(true),
-                Totems.CreateTotemsBehavior(),
+                Helpers.Common.CreateAutoAttack(true),
+                
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown(),
                     new PrioritySelector(
@@ -311,20 +311,13 @@ namespace Singular.ClassSpecific.Shaman
                         Helpers.Common.CreateInterruptBehavior(),
 
                         Common.CreateShamanDpsShieldBehavior(),
-
+                        Totems.CreateTotemsBehavior(),
                         // Spell.BuffSelf("Spiritwalker's Grace", ret => StyxWoW.Me.IsMoving && StyxWoW.Me.Combat),
-                        Spell.BuffSelf("Feral Spirit", ret =>
-                            ShamanSettings.FeralSpiritCastOn == CastOn.All
-                            || (ShamanSettings.FeralSpiritCastOn == CastOn.Bosses && StyxWoW.Me.CurrentTarget.IsBoss() )
-                            || (ShamanSettings.FeralSpiritCastOn == CastOn.Players && Unit.NearbyUnfriendlyUnits.Any(u => u.IsPlayer && u.Combat && u.IsTargetingMeOrPet))),
-
-                        Spell.BuffSelf("Ascendance", ret =>
-                            ShamanSettings.FeralSpiritCastOn == CastOn.All
-                            || (ShamanSettings.FeralSpiritCastOn == CastOn.Bosses && StyxWoW.Me.CurrentTarget.IsBoss())
-                            || (ShamanSettings.FeralSpiritCastOn == CastOn.Players && Unit.NearbyUnfriendlyUnits.Any(u => u.IsPlayer && u.Combat && u.IsTargetingMeOrPet))),
-
+                        Spell.BuffSelf("Feral Spirit", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        Spell.BuffSelf("Ascendance", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        //Spell.BuffSelf("Fire Elemental Totem", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
                         new Decorator(
-                            ret => Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 3 && !Unit.UnfriendlyUnitsNearTarget(10f).Any(u => u.IsCrowdControlled()),
+                            ret => Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 3,
                             new PrioritySelector(
                                 Spell.Cast("Unleash Elements"),
                                 Spell.Buff("Flame Shock", true),
@@ -339,15 +332,18 @@ namespace Singular.ClassSpecific.Shaman
                                 //Movement.CreateMoveToMeleeBehavior(true)
                                 )),
                         Spell.Cast("Lightning Bolt", ret => StyxWoW.Me.HasAura("Maelstrom Weapon", 5)),
+                        Spell.Cast("Lava Lash", ret => StyxWoW.Me.HasAura("Searing Flames", 5)),
                         //Spell.Cast("Elemental Blast"),
                         Spell.Cast("Unleash Elements", ret => Common.HasTalent(ShamanTalents.UnleashedFury)),
-                        Spell.Buff("Flame Shock", ret => StyxWoW.Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds < 6),
+                        Spell.Buff("Flame Shock", ret => StyxWoW.Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds <= 1),
                         Spell.Cast("Stormstrike"),
+                        Spell.Cast("Stormblast"),
                         //Spell.Cast("Primal Strike", ret => !SpellManager.HasSpell("Stormstrike")),
-                        Spell.Cast("Lava Lash", ret => StyxWoW.Me.HasAura("Searing Flames", 5)),
+                        
                         //Spell.Cast("Unleash Elements"),
                         Spell.Buff("Flame Shock", true, ret => StyxWoW.Me.HasAura("Unleash Flame")),
                         Spell.Cast("Earth Shock", ret => StyxWoW.Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds > 6),
+                        //Spell.Cast("Lava Lash"),
                         Spell.Cast("Lightning Bolt", ret => Unit.GetAuraStacks(StyxWoW.Me, "Maelstrom Weapon") >= 2 && Spell.GetSpellCooldown("Stormstrike").Seconds > 1 && Spell.GetSpellCooldown("Unleash Elements").Seconds > 1)
                     ))
 
