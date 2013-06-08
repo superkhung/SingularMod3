@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Linq;
-
+using System.Text;
 using Singular.Dynamics;
 using Singular.Helpers;
 using Singular.Managers;
@@ -332,18 +332,20 @@ namespace Singular.ClassSpecific.Shaman
                                 Spell.Cast("Stormstrike")
                                 //Movement.CreateMoveToMeleeBehavior(true)
                                 )),
+
+                        //Spell.Cast("Elemental Blast"),
+                        Spell.Cast("Unleash Elements"),
+                        Spell.Buff("Flame Shock", ret => !Me.CurrentTarget.HasMyAura("Flame Shock")),
+                        Spell.Cast("Stormstrike"),
+                        RunMacroText("/cast Stormblast", ret => Me.HasAura(128201)),
+                        //Lua.DoString("RunMacroText(\"/Cast Stormblast\")"),
                         Spell.Cast("Lightning Bolt", ret => StyxWoW.Me.HasAura("Maelstrom Weapon", 5)),
                         Spell.Cast("Lava Lash", ret => StyxWoW.Me.HasAura("Searing Flames", 5)),
-                        //Spell.Cast("Elemental Blast"),
-                        Spell.Cast("Unleash Elements", ret => Common.HasTalent(ShamanTalents.UnleashedFury)),
-                        Spell.Buff("Flame Shock", ret => StyxWoW.Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds <= 1),
-                        Spell.Cast("Stormstrike"),
-                        new Action(ret => Lua.DoString("RunMacroText(\"/Cast Stormblast\")")),
                         //Spell.Cast("Primal Strike", ret => !SpellManager.HasSpell("Stormstrike")),
                         
                         //Spell.Cast("Unleash Elements"),
                         Spell.Buff("Flame Shock", true, ret => StyxWoW.Me.HasAura("Unleash Flame")),
-                        Spell.Cast("Earth Shock", ret => StyxWoW.Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds > 6),
+                        Spell.Cast("Earth Shock", ret => Spell.GetSpellCooldown("Unleash Elements").Seconds > 4),
                         //Spell.Cast("Lava Lash"),
                         Spell.Cast("Lightning Bolt", ret => Spell.GetSpellCooldown("Stormstrike").Seconds > 1 && Spell.GetSpellCooldown("Unleash Elements").Seconds > 1)
                     ))
@@ -351,7 +353,24 @@ namespace Singular.ClassSpecific.Shaman
                 //Movement.CreateMoveToMeleeBehavior(true)
                 );
         }
+        public static string RealLuaEscape(string luastring)
+        {
+            var bytes = Encoding.UTF8.GetBytes(luastring);
+            return bytes.Aggregate(String.Empty, (current, b) => current + ("\\" + b));
+        }
 
+        public static Composite RunMacroText(string macro, CanRunDecoratorDelegate cond)
+        {
+            return new Decorator(
+                       cond,
+
+                //new PrioritySelector(
+                       new Sequence(
+                           new Action(a => Styx.WoWInternals.Lua.DoString("RunMacroText(\"" + RealLuaEscape(macro) + "\")"))
+                           //new Action(a => Logger.DebugLog("Running Macro Text: {0}", macro))
+                               )
+                           );
+        }
         #endregion
 
         #region Diagnostics

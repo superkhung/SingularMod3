@@ -675,6 +675,11 @@ namespace Singular.Helpers
             }
         }
 
+
+        internal static bool HasMyAura(string p)
+        {
+            throw new NotImplementedException();
+        }
     }
 
     // following class should probably be in Unit, but made a separate 
