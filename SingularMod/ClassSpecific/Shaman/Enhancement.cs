@@ -295,12 +295,12 @@ namespace Singular.ClassSpecific.Shaman
         public static Composite CreateShamanEnhancementInstancePullAndCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
+                //Safers.EnsureTarget(),
                 //Movement.CreateMoveToLosBehavior(),
                 //Movement.CreateFaceTargetBehavior(),
                 //Helpers.Common.CreateDismount("Pulling"),
                 Spell.WaitForCastOrChannel(),
-                Helpers.Common.CreateAutoAttack(true),
+                //Helpers.Common.CreateAutoAttack(true),
                 
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown(),
