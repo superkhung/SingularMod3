@@ -303,7 +303,7 @@ namespace Singular.ClassSpecific.Shaman
                 //Helpers.Common.CreateAutoAttack(true),
                 
                 new Decorator(
-                    ret => !Spell.IsGlobalCooldown(),
+                    ret => !Spell.IsGlobalCooldown() && !Me.CurrentTarget.IsFriendly && !Me.Mounted && !Me.CurrentTarget.IsDead,
                     new PrioritySelector(
 
                         //CreateEnhanceDiagnosticOutputBehavior(),
