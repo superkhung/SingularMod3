@@ -188,14 +188,11 @@ namespace Singular.ClassSpecific.Shaman
             // create Fire Totems behavior first, then wrap if needed
             Composite fireTotemBehavior =
                 new PrioritySelector(
-                    Spell.BuffSelf("Fire Elemental Totem", ret => Me.CurrentTarget.IsBoss()),
+                    //Spell.Cast("Fire Elemental Totem", ret => Me.CurrentTarget.IsBoss())
 
                     // Magma handled within each specs AoE support
 
-                    Spell.BuffSelf("Searing Totem",
-                        ret => Me.GotTarget
-                            && Me.CurrentTarget.Distance < GetTotemRange(WoWTotem.Searing) - 2f && !Totems.Exist(WoWTotemType.Fire)
-                            )
+                    //Spell.Cast("Searing Totem", ret => !Totems.Exist(WoWTotemType.Fire) && Me.CurrentTarget.Distance < GetTotemRange(WoWTotem.Searing) - 2f)
                     );
 
             if (Me.Specialization == WoWSpec.ShamanRestoration)

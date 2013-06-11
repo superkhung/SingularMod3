@@ -295,12 +295,12 @@ namespace Singular.ClassSpecific.Shaman
         public static Composite CreateShamanEnhancementInstancePullAndCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
+                //Safers.EnsureTarget(),
                 //Movement.CreateMoveToLosBehavior(),
                 //Movement.CreateFaceTargetBehavior(),
                 //Helpers.Common.CreateDismount("Pulling"),
-                Spell.WaitForCastOrChannel(),
-                Helpers.Common.CreateAutoAttack(true),
+                Spell.WaitForCast(true),
+                //Helpers.Common.CreateAutoAttack(true),
                 
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown() && !Me.Mounted,
@@ -313,29 +313,29 @@ namespace Singular.ClassSpecific.Shaman
                         Common.CreateShamanDpsShieldBehavior(),
                         Totems.CreateTotemsBehavior(),
                         // Spell.BuffSelf("Spiritwalker's Grace", ret => StyxWoW.Me.IsMoving && StyxWoW.Me.Combat),
-                        Spell.BuffSelf("Feral Spirit", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
-                        Spell.BuffSelf("Ascendance", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
-                        Spell.BuffSelf("Elemental Mastery", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
-                        Spell.BuffSelf("Fire Elemental Totem", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        Spell.Cast("Astral Shift", ret => Me.HealthPercent <= 40),
+                        Spell.Cast("Healing Surge", ret => Me.HealthPercent <= 50 && Me.HasAura("Maelstrom Weapon", 5) && !Me.CurrentTarget.IsBoss),
+                        Spell.Cast("Feral Spirit", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        Spell.Cast("Ascendance", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        Spell.Cast("Elemental Mastery", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        Spell.Cast("Fire Elemental Totem", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
                         new Decorator(
-                            ret => Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 3,
+                            ret => Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= SingularSettings.Instance.AOENumber,
                             new PrioritySelector(
+                                Spell.Cast("Magma Totem", ret => !Totems.Exist(WoWTotem.Magma)),
                                 Spell.Cast("Unleash Elements"),
-                                Spell.Buff("Flame Shock", true),
-                                Spell.Cast("Lava Lash", 
-                                    ret => StyxWoW.Me.CurrentTarget.HasMyAura("Flame Shock") &&
-                                           StyxWoW.Me.Inventory.Equipped.OffHand != null && 
-                                           StyxWoW.Me.Inventory.Equipped.OffHand.ItemInfo.ItemClass == WoWItemClass.Weapon),
+                                Spell.Cast("Flame Shock"),
+                                Spell.Cast("Lava Lash", ret => StyxWoW.Me.CurrentTarget.HasMyAura("Flame Shock")),
                                 Spell.Cast("Fire Nova"),
                                 Spell.Cast("Chain Lightning", ret => StyxWoW.Me.HasAura("Maelstrom Weapon", 5)),
-                                Spell.Cast("Chain Lightning", ret => Unit.GetAuraStacks(StyxWoW.Me, "Maelstrom Weapon") >= 2 && Spell.GetSpellCooldown("Fire Nova").Seconds > 1 && Spell.GetSpellCooldown("Unleash Elements").Seconds > 1),
+                                Spell.Cast("Chain Lightning", ret => Spell.GetSpellCooldown("Fire Nova").Seconds > 1 && Spell.GetSpellCooldown("Unleash Elements").Seconds > 1),
                                 Spell.Cast("Stormstrike")
                                 //Movement.CreateMoveToMeleeBehavior(true)
                                 )),
-
+                        Spell.Cast("Searing Totem", ret => !Totems.Exist(WoWTotemType.Fire) && Me.CurrentTarget.Distance < Totems.GetTotemRange(WoWTotem.Searing) - 2f),
                         //Spell.Cast("Elemental Blast"),
                         Spell.Cast("Unleash Elements"),
-                        Spell.Buff("Flame Shock", ret => !Me.CurrentTarget.HasMyAura("Flame Shock")),
+                        Spell.Cast("Flame Shock", ret => !Me.CurrentTarget.HasMyAura("Flame Shock")),
                         Spell.Cast("Stormstrike"),
                         RunMacroText("/cast Stormblast", ret => Me.HasAura(128201)),
                         //Lua.DoString("RunMacroText(\"/Cast Stormblast\")"),
@@ -344,7 +344,7 @@ namespace Singular.ClassSpecific.Shaman
                         //Spell.Cast("Primal Strike", ret => !SpellManager.HasSpell("Stormstrike")),
                         
                         //Spell.Cast("Unleash Elements"),
-                        Spell.Buff("Flame Shock", true, ret => StyxWoW.Me.HasAura("Unleash Flame")),
+                        Spell.Cast("Flame Shock", ret => StyxWoW.Me.HasAura("Unleash Flame")),
                         Spell.Cast("Earth Shock", ret => Spell.GetSpellCooldown("Unleash Elements").Seconds > 4),
                         //Spell.Cast("Lava Lash"),
                         Spell.Cast("Lightning Bolt", ret => Spell.GetSpellCooldown("Stormstrike").Seconds > 1 && Spell.GetSpellCooldown("Unleash Elements").Seconds > 1)
