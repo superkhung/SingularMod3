@@ -155,7 +155,7 @@ namespace Singular.Settings
             {
                 if (ctx == Singular.HealingContext.Battlegrounds)
                 {
-                    HealingWave = 95;
+                    UseCDs = 95;
                     ChainHeal = 90;
                     HealingRain = 93;
                     GreaterHealingWave = 0;
@@ -173,7 +173,7 @@ namespace Singular.Settings
                 }
                 else if (ctx == Singular.HealingContext.Instances)
                 {
-                    HealingWave = 90;
+                    UseCDs = 90;
                     ChainHeal = 90;
                     HealingRain = 70;
                     GreaterHealingWave = 70;
@@ -191,7 +191,7 @@ namespace Singular.Settings
                 }
                 else if (ctx == Singular.HealingContext.Raids)
                 {
-                    HealingWave = 93;
+                    UseCDs = 93;
                     ChainHeal = 90;
                     HealingRain = 95;
                     GreaterHealingWave = 50;
@@ -232,6 +232,13 @@ namespace Singular.Settings
         [Browsable(false)]
         [DefaultValue(false)]
         public bool HealingSurgeAdjusted { get; set; }
+
+        [Setting]
+        [DefaultValue(true)]
+        [Category("Global")]
+        [DisplayName("Use CDs")]
+        [Description("CDs")]
+        public bool UseCDs { get; set; }
 
         [Setting]
         [DefaultValue(70)]

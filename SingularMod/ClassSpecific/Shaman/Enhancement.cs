@@ -292,6 +292,7 @@ namespace Singular.ClassSpecific.Shaman
 
         #region Instance Rotation
         [Behavior(BehaviorType.Pull | BehaviorType.Combat, WoWClass.Shaman, WoWSpec.ShamanEnhancement, WoWContext.Instances | WoWContext.Normal)]
+        //private static ShamanSettings ShamanSettings { get { return SingularSettings.Instance.Shaman(); } }
         public static Composite CreateShamanEnhancementInstancePullAndCombat()
         {
             return new PrioritySelector(
@@ -315,15 +316,15 @@ namespace Singular.ClassSpecific.Shaman
                         // Spell.BuffSelf("Spiritwalker's Grace", ret => StyxWoW.Me.IsMoving && StyxWoW.Me.Combat),
                         Spell.BuffSelf("Astral Shift", ret => Me.HealthPercent <= 40),
                         Spell.BuffSelf("Healing Surge", ret => Me.HealthPercent <= 50 && Me.HasAura("Maelstrom Weapon", 5) && !Me.CurrentTarget.IsBoss),
-                        Spell.Cast("Feral Spirit", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
-                        Spell.BuffSelf("Ascendance", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),                   
-                        Spell.Cast("Fire Elemental Totem", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
-                        Spell.Cast("Elemental Mastery", ret => StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        Spell.Cast("Feral Spirit", ret => ShamanSettings.Instance.UseCDs && StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        Spell.BuffSelf("Ascendance", ret => ShamanSettings.Instance.UseCDs && StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        Spell.Cast("Fire Elemental Totem", ret => ShamanSettings.Instance.UseCDs && StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        Spell.Cast("Elemental Mastery", ret => ShamanSettings.Instance.UseCDs && StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
 
                         new Decorator(
                             ret => Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= SingularSettings.Instance.AOENumber,
                             new PrioritySelector(
-                                Spell.BuffSelf("Magma Totem", ret => !Totems.Exist(WoWTotem.Magma)),
+                                Spell.BuffSelf("Magma Totem", ret => !Totems.Exist(WoWTotemType.Fire) && Me.CurrentTarget.Distance < Totems.GetTotemRange(WoWTotem.Magma) - 1f)),
                                 Spell.Cast("Unleash Elements"),
                                 Spell.Cast("Flame Shock"),
                                 Spell.Cast("Lava Lash", ret => Me.CurrentTarget.HasMyAura("Flame Shock")),
