@@ -409,7 +409,7 @@ namespace Singular.ClassSpecific.Shaman
         {
             HealerManager.NeedHealTargeting = true;
             PrioritizedBehaviorList behavs = new PrioritizedBehaviorList();
-            int cancelHeal = (int)Math.Max( SingularSettings.Instance.IgnoreHealTargetsAboveHealth, Math.Max(ShamanSettings.Heal.UseCDs, Math.Max(ShamanSettings.Heal.GreaterHealingWave, ShamanSettings.Heal.HealingSurge)));
+            int cancelHeal = (int)Math.Max(SingularSettings.Instance.IgnoreHealTargetsAboveHealth, Math.Max(ShamanSettings.Heal.HealingWave, Math.Max(ShamanSettings.Heal.GreaterHealingWave, ShamanSettings.Heal.HealingSurge)));
 
             Logger.WriteFile( "Shaman Healing: will cancel cast of direct heal if health reaches {0:F1}%", cancelHeal);
 
@@ -566,12 +566,12 @@ namespace Singular.ClassSpecific.Shaman
                     )
                 );
 
-            behavs.AddBehavior(HealthToPriority(ShamanSettings.Heal.UseCDs), "Healing Wave", "Healing Wave",
+            behavs.AddBehavior(HealthToPriority(ShamanSettings.Heal.HealingWave), "Healing Wave", "Healing Wave",
                 new Sequence(
                         Spell.Cast("Healing Wave",
                             mov => true,
                             on => (WoWUnit)on,
-                            req => ((WoWUnit)req).GetPredictedHealthPercent() < ShamanSettings.Heal.UseCDs,
+                            req => ((WoWUnit)req).GetPredictedHealthPercent() < ShamanSettings.Heal.HealingWave,
                             cancel => ((WoWUnit)cancel).HealthPercent > cancelHeal),
                     new Action(r => TidalWaveConsume())
                     )

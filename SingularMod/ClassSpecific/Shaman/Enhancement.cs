@@ -316,15 +316,15 @@ namespace Singular.ClassSpecific.Shaman
                         // Spell.BuffSelf("Spiritwalker's Grace", ret => StyxWoW.Me.IsMoving && StyxWoW.Me.Combat),
                         Spell.BuffSelf("Astral Shift", ret => Me.HealthPercent <= 40),
                         Spell.BuffSelf("Healing Surge", ret => Me.HealthPercent <= 50 && Me.HasAura("Maelstrom Weapon", 5) && !Me.CurrentTarget.IsBoss),
-                        Spell.Cast("Feral Spirit", ret => ShamanSettings.Instance.UseCDs && StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
-                        Spell.BuffSelf("Ascendance", ret => ShamanSettings.Instance.UseCDs && StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
-                        Spell.Cast("Fire Elemental Totem", ret => ShamanSettings.Instance.UseCDs && StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
-                        Spell.Cast("Elemental Mastery", ret => ShamanSettings.Instance.UseCDs && StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        Spell.Cast("Feral Spirit", ret => ShamanSettings.Instance.UseCD && StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        Spell.BuffSelf("Ascendance", ret => ShamanSettings.Instance.UseCD && StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        Spell.Cast("Fire Elemental Totem", ret => ShamanSettings.Instance.UseCD && StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
+                        Spell.Cast("Elemental Mastery", ret => ShamanSettings.Instance.UseCD && StyxWoW.Me.CurrentTarget.IsBoss || StyxWoW.Me.CurrentTarget.IsPlayer),
 
                         new Decorator(
                             ret => Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= SingularSettings.Instance.AOENumber,
                             new PrioritySelector(
-                                Spell.BuffSelf("Magma Totem", ret => !Totems.Exist(WoWTotemType.Fire) && Me.CurrentTarget.Distance < Totems.GetTotemRange(WoWTotem.Magma) - 1f)),
+                                Spell.BuffSelf("Magma Totem", ret => !Totems.Exist(WoWTotemType.Fire) && Me.CurrentTarget.Distance < Totems.GetTotemRange(WoWTotem.Magma) - 1f),
                                 Spell.Cast("Unleash Elements"),
                                 Spell.Cast("Flame Shock"),
                                 Spell.Cast("Lava Lash", ret => Me.CurrentTarget.HasMyAura("Flame Shock")),

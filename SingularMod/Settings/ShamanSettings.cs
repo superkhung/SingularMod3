@@ -155,7 +155,7 @@ namespace Singular.Settings
             {
                 if (ctx == Singular.HealingContext.Battlegrounds)
                 {
-                    UseCDs = 95;
+                    HealingWave = 95;
                     ChainHeal = 90;
                     HealingRain = 93;
                     GreaterHealingWave = 0;
@@ -173,7 +173,7 @@ namespace Singular.Settings
                 }
                 else if (ctx == Singular.HealingContext.Instances)
                 {
-                    UseCDs = 90;
+                    HealingWave = 90;
                     ChainHeal = 90;
                     HealingRain = 70;
                     GreaterHealingWave = 70;
@@ -191,7 +191,7 @@ namespace Singular.Settings
                 }
                 else if (ctx == Singular.HealingContext.Raids)
                 {
-                    UseCDs = 93;
+                    HealingWave = 93;
                     ChainHeal = 90;
                     HealingRain = 95;
                     GreaterHealingWave = 50;
@@ -238,7 +238,7 @@ namespace Singular.Settings
         [Category("Global")]
         [DisplayName("Use CDs")]
         [Description("CDs")]
-        public bool UseCDs { get; set; }
+        public bool UseCD { get; set; }
 
         [Setting]
         [DefaultValue(70)]
