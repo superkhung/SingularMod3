@@ -240,7 +240,7 @@ namespace Singular.ClassSpecific.Rogue
                 ret => Common.IsStealthed,
                 new PrioritySelector(
                     CreateRoguePickPocket(),
-                    Spell.Cast("Ambush", ret => Me.IsSafelyBehind(Me.CurrentTarget) || Common.HasTalent( RogueTalents.MarkedForDeath )),
+                    Spell.Cast("Ambush", ret => Me.IsSafelyBehind(Me.CurrentTarget) || Common.HasTalent( RogueTalents.MarkedForDeath ) || Common.HasTalent(RogueTalents.CloakAndDagger)),
                     Spell.Cast("Garrote", ret => !Me.IsMoving && !Me.IsSafelyBehind(Me.CurrentTarget) || Common.HasTalent(RogueTalents.MarkedForDeath)),
                     Spell.Cast("Cheap Shot", ret => !Me.IsMoving )
                     )
@@ -327,7 +327,7 @@ namespace Singular.ClassSpecific.Rogue
         {
             return new Action(ret =>
             {
-                if (!Spell.UseAOE || Battlegrounds.IsInsideBattleground || Unit.NearbyUnfriendlyUnits.Any(u => u.Guid != Me.CurrentTargetGuid && u.IsCrowdControlled()))
+                if (Battlegrounds.IsInsideBattleground || Unit.NearbyUnfriendlyUnits.Any(u => u.Guid != Me.CurrentTargetGuid && u.IsCrowdControlled()))
                     AoeCount = 1;
                 else
                     AoeCount = Unit.NearbyUnfriendlyUnits.Count(u => u.Distance < (u.MeleeDistance() + 3));
