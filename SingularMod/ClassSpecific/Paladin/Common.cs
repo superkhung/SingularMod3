@@ -87,7 +87,7 @@ namespace Singular.ClassSpecific.Paladin
         {
             return
                 new PrioritySelector(
-
+                    /*
                         PartyBuff.BuffGroup( 
                             "Blessing of Kings", 
                             ret => PaladinSettings.Blessings == PaladinBlessings.Auto || PaladinSettings.Blessings == PaladinBlessings.Kings,
@@ -96,7 +96,7 @@ namespace Singular.ClassSpecific.Paladin
                         PartyBuff.BuffGroup(
                             "Blessing of Might",
                             ret => PaladinSettings.Blessings == PaladinBlessings.Auto || PaladinSettings.Blessings == PaladinBlessings.Might, 
-                            "Blessing of Kings")
+                            "Blessing of Kings")*/
                     );
         }
 
@@ -162,7 +162,7 @@ namespace Singular.ClassSpecific.Paladin
                             bestSeal = Settings.PaladinSeal.Insight;
                         else if (SingularRoutine.CurrentWoWContext == WoWContext.Battlegrounds)
                             bestSeal = Settings.PaladinSeal.Truth;
-                        else if (Unit.NearbyUnfriendlyUnits.Count(u => u.Distance <= 8) >= 4)
+                        else if (Unit.NearbyUnfriendlyUnits.Count(u => u.Distance <= 8) >= 8)
                             bestSeal = Settings.PaladinSeal.Righteousness;
                         break;
                 }

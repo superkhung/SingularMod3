@@ -261,17 +261,13 @@ namespace Singular.ClassSpecific.Paladin
                         Spell.Cast("Guardian of Ancient Kings", ret => Me.CurrentTarget.IsBoss() && Me.ActiveAuras.ContainsKey("Inquisition")),
                         Spell.BuffSelf("Avenging Wrath", ret => Me.CurrentTarget.IsBoss() && Me.ActiveAuras.ContainsKey("Inquisition") && (Common.HasTalent(PaladinTalents.SanctifiedWrath) || Me.CurrentTarget.IsBoss() && Spell.GetSpellCooldown("Guardian of Ancient Kings").TotalSeconds <= 290)),
                         Spell.BuffSelf("Inquisition", ret => Me.CurrentHolyPower > 0 && Me.GetAuraTimeLeft("Inquisition", true).TotalSeconds <= 2),
-                        Spell.Cast("Templar's Verdict", ret => Me.CurrentHolyPower >= 5),
-                        Spell.Cast("Execution Sentence", ret => Me.CurrentTarget.IsBoss),
-                        Spell.Cast("Hammer of Wrath"),
                         Spell.Cast("Exorcism", ret => Me.CurrentTarget.IsWithinMeleeRange),
+                        Spell.Cast("Templar's Verdict", ret => Me.CurrentHolyPower >= 3),
+                        Spell.Cast("Execution Sentence", ret => Me.CurrentTarget.IsBoss),
+                        Spell.Cast("Hammer of Wrath"),                       
                         Spell.Cast("Crusader Strike"),
                         Spell.Cast("Judgment"),
-                        Spell.Cast("Templar's Verdict", ret => Me.CurrentHolyPower >= 3),
-                        Spell.BuffSelf("Sacred Shield"),
-
-                        // Symbiosis
-                        Spell.Cast("Wrath", ret => !Me.CurrentTarget.IsWithinMeleeRange && Me.CurrentTarget.Distance < 40)
+                        Spell.BuffSelf("Sacred Shield")
                         )
                     ),
 
