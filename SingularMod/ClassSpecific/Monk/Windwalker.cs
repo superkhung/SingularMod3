@@ -43,9 +43,7 @@ namespace Singular.ClassSpecific.Monk
                     Helpers.Common.CreateInterruptBehavior(),
 						//CD & defense
                     Spell.Cast("Invoke Xuen, the White Tiger", ret => Me.CurrentTarget.IsBoss()),
-					//Spell.Cast("Tigereye Brew", ret => !MonkSettings.ReOrigination && Unit.GetAuraStacks(Me, "Tigereye Brew") >= 10 ||
-			           //MonkSettings.ReOrigination && Unit.GetAuraStacks(Me, "Tigereye Brew") >= 18 ||
-                      // Unit.GetAuraStacks(Me, "Tigereye Brew") >= 4 && Me.HasAura(ReOriginationMastery) && Me.GetAuraTimeLeft(ReOriginationMastery).TotalMilliseconds <= MonkSettings.ReOriginationProcTime),
+					Spell.Cast("Tigereye Brew", ret => Unit.GetAuraStacks(Me, "Tigereye Brew") >= 10),
 					Spell.Cast("Energizing Brew", ret => Me.CurrentEnergy < 30),
 					Spell.Cast("Fortifying Brew", ret => Me.HealthPercent <= 35),
 					Spell.Cast("Touch of Karma", ret => Me.HealthPercent <= 45),
@@ -56,8 +54,7 @@ namespace Singular.ClassSpecific.Monk
 					Spell.Cast("Chi Wave", ret => Me.CurrentEnergy <= 80),
 					Spell.Cast("Tiger Palm", ret => Me.CurrentChi > 0 && (!Me.HasAura("Tiger Power") || Me.GetAuraTimeLeft("Tiger Power", true).TotalSeconds < 3) || Me.HasAura("Combo Breaker: Tiger Palm")),						
 					Spell.Cast("Rising Sun Kick", ret => Me.CurrentChi >= 2),
-                    Spell.Cast("Fists of Fury", ret => Me.CurrentChi >= 3 && Me.CurrentEnergy < 60 && !Me.IsMoving && Me.HasAura("Tiger Power") && !Me.HasAura("Energizing Brew") && Me.HasAura(TigereyeBrewBuff) ||
-                       !Me.HasAura(ReOriginationMastery) && Me.CurrentChi >= 3 && Me.CurrentEnergy < 30 && !Me.IsMoving && Me.HasAura("Tiger Power") && !Me.HasAura("Energizing Brew")),
+                    Spell.Cast("Fists of Fury", ret => Me.CurrentChi >= 3 && Me.CurrentEnergy < 35 && !Me.IsMoving && Me.HasAura("Tiger Power") && !Me.HasAura("Energizing Brew")),
 
                     new Decorator(ret => !Spell.IsGlobalCooldown() && Unit.NearbyUnfriendlyUnits.Count(u => u.Distance <= 8) >= SingularSettings.Instance.AOENumber && !Me.HasAura(ReOriginationMastery),
 					new PrioritySelector
