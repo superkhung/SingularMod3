@@ -16,10 +16,12 @@ using System;
 
 using Action = Styx.TreeSharp.Action;
 using Styx.CommonBot;
+using Styx.CommonBot.POI;
 using Styx.WoWInternals.WoWObjects;
 using Styx.Helpers;
 using Styx.WoWInternals;
 using Styx.Common.Helpers;
+using System.Collections.Generic;
 
 namespace Singular
 {
@@ -33,6 +35,7 @@ namespace Singular
         private Composite _pullBuffsBehavior;
         private Composite _restBehavior;
         private Composite _lostControlBehavior;
+        private Composite _deathBehavior;
         public override Composite CombatBehavior { get { return _combatBehavior; } }
         public override Composite CombatBuffBehavior { get { return _combatBuffsBehavior; } }
         public override Composite HealBehavior { get { return _healBehavior; } }
@@ -40,13 +43,14 @@ namespace Singular
         public override Composite PullBehavior { get { return _pullBehavior; } }
         public override Composite PullBuffBehavior { get { return _pullBuffsBehavior; } }
         public override Composite RestBehavior { get { return _restBehavior; } }
+        public override Composite DeathBehavior { get { return _deathBehavior; } }
 
         private static ulong _guidLastTarget = 0;
-        private static WaitTimer _timerLastTarget = new WaitTimer(TimeSpan.FromSeconds(5));
+        private static WaitTimer _timerLastTarget = new WaitTimer(TimeSpan.FromSeconds(20));
 
         public bool RebuildBehaviors(bool silent = false)
         {
-            Logger.PrintStackTrace("RebuildBehaviors called.");
+            // Logger.PrintStackTrace("RebuildBehaviors called.");
 
             InitBehaviors();
 
@@ -58,32 +62,39 @@ namespace Singular
             //UpdateContext();
 
             // special behavior - reset KitingBehavior hook prior to calling class specific createion
-            TreeHooks.Instance.ReplaceHook("KitingBehavior", new ActionAlwaysFail());
+            TreeHooks.Instance.ReplaceHook(HookName("KitingBehavior"), new ActionAlwaysFail());
+
+            if (!silent)
+            {
+                Logger.WriteFile("");
+                Logger.WriteFile("{0} {1} {2}", "Pri".AlignRight(4), "Context".AlignLeft(15), "Method");
+            }
 
             // If these fail, then the bot will be stopped. We want to make sure combat/pull ARE implemented for each class.
-            if (!EnsureComposite(true, context, BehaviorType.Combat))
+            if (!EnsureComposite( silent, true, context, BehaviorType.Combat))
             {
                 return false;
             }
 
-            if (!EnsureComposite(true, context, BehaviorType.Pull))
+            if (!EnsureComposite( silent, true, context, BehaviorType.Pull))
             {
                 return false;
             }
 
             // If there's no class-specific resting, just use the default, which just eats/drinks when low.
-            EnsureComposite(false, context, BehaviorType.Rest);
-            if (TreeHooks.Instance.Hooks[BehaviorType.Rest.ToString()] == null)
-                TreeHooks.Instance.ReplaceHook(BehaviorType.Rest.ToString(), Helpers.Rest.CreateDefaultRestBehaviour());
-
+            EnsureComposite( silent, false, context, BehaviorType.Rest);
+            // if (TreeHooks.Instance.Hooks[HookName(BehaviorType.Rest)] == null)
+            if (!TreeHooks.Instance.Hooks.ContainsKey(HookName(BehaviorType.Rest)) || TreeHooks.Instance.Hooks[HookName(BehaviorType.Rest)].Count <= 0)
+                TreeHooks.Instance.ReplaceHook(HookName(BehaviorType.Rest), Helpers.Rest.CreateDefaultRestBehaviour());
 
             // These are optional. If they're not implemented, we shouldn't stop because of it.
-            EnsureComposite(false, context, BehaviorType.CombatBuffs);
-            EnsureComposite(false, context, BehaviorType.Heal);
-            EnsureComposite(false, context, BehaviorType.PullBuffs);
-            EnsureComposite(false, context, BehaviorType.PreCombatBuffs);
+            EnsureComposite( silent, false, context, BehaviorType.CombatBuffs);
+            EnsureComposite( silent, false, context, BehaviorType.Heal);
+            EnsureComposite( silent, false, context, BehaviorType.PullBuffs);
+            EnsureComposite( silent, false, context, BehaviorType.PreCombatBuffs);
+            EnsureComposite( silent, false, context, BehaviorType.Death);
 
-            EnsureComposite(false, context, BehaviorType.LossOfControl);
+            EnsureComposite(silent, false, context, BehaviorType.LossOfControl);
 
 #if SHOW_BEHAVIOR_LOAD_DESCRIPTION
             // display concise single line describing what behaviors we are loading
@@ -108,6 +119,11 @@ namespace Singular
                 Logger.Write(Color.LightGreen, "Loaded{0} behaviors for {1}: {2}", Me.Specialization.ToString().CamelToSpaced(), context.ToString(), sMsg);
             }
 #endif
+            if (!silent)
+            {
+                Logger.WriteFile("");
+            }
+
             return true;
         }
 
@@ -119,6 +135,7 @@ namespace Singular
         {
             // be sure to turn off -- routines needing it will enable when rebuilt
             HealerManager.NeedHealTargeting = false;
+            HealerManager.Instance.Clear();
 
             // we only do this one time
             if (_restBehavior != null)
@@ -131,14 +148,23 @@ namespace Singular
 
             // loss of control behavior must be defined prior to any embedded references by other behaviors
             _lostControlBehavior = new Decorator(
-                ret => Me.Fleeing || Me.Stunned,
+                ret => HaveWeLostControl,
                 new PrioritySelector(
+                    new Action( r => { 
+                        if ( !StyxWoW.IsInGame )
+                        {
+                            Logger.WriteDebug(Color.White, "Not in game...");
+                            return RunStatus.Success;
+                        }
+                        
+                        return RunStatus.Failure; 
+                        }),
                     new ThrottlePasses(1, 1, new Decorator(ret => Me.Fleeing, new Action(r => { Logger.Write(Color.White, "FLEEING! (loss of control)"); return RunStatus.Failure; }))),
                     new ThrottlePasses(1, 1, new Decorator(ret => Me.Stunned, new Action(r => { Logger.Write(Color.White, "STUNNED! (loss of control)"); return RunStatus.Failure; }))),
                     new ThrottlePasses(1, 1, new Decorator(ret => Me.Silenced, new Action(r => { Logger.Write(Color.White, "SILENCED! (loss of control)"); return RunStatus.Failure; }))),
                     new Throttle(1,
                         new PrioritySelector(
-                            new HookExecutor(BehaviorType.LossOfControl.ToString()),
+                            new HookExecutor(HookName(BehaviorType.LossOfControl)),
                             new Decorator(
                                 ret => SingularSettings.Instance.UseRacials,
                                 new PrioritySelector(
@@ -156,109 +182,210 @@ namespace Singular
                 );
 
             _restBehavior = new LockSelector(
-                new Decorator(
-                    ret => !Me.IsFlying && AllowBehaviorUsage() && !SingularSettings.Instance.DisableNonCombatBehaviors,
-                    new PrioritySelector(
-                        // new Action(r => { _guidLastTarget = 0; return RunStatus.Failure; }),
-                        Spell.WaitForGcdOrCastOrChannel(),
-                        _lostControlBehavior,
-                        new HookExecutor(BehaviorType.Rest.ToString())
+                new CallWatch( "Rest",
+                    new Decorator(
+                        ret => !Me.IsFlying && AllowBehaviorUsage() && !SingularSettings.Instance.DisableNonCombatBehaviors,
+                        new PrioritySelector(
+                            // new Action(r => { _guidLastTarget = 0; return RunStatus.Failure; }),
+                            Spell.WaitForGcdOrCastOrChannel(),
+
+                            // lost control in Rest -- force a RunStatus.Failure so we don't loop in Rest
+                            new Sequence(
+                                _lostControlBehavior,
+                                new ActionAlwaysFail()
+                                ),
+
+                            // skip Rest logic if we lost control (since we had to return Fail to prevent Rest loop)
+                            new Decorator(
+                                req => !HaveWeLostControl,
+                                new HookExecutor(HookName(BehaviorType.Rest))
+                                )
+                            )
                         )
                     )
                 );
 
             _preCombatBuffsBehavior = new LockSelector(
-                new Decorator(  // suppress non-combat buffing if standing around waiting on DungeonBuddy or BGBuddy queues
-                    ret => !Me.Mounted
-                        && !SingularSettings.Instance.DisableNonCombatBehaviors
-                        && AllowNonCombatBuffing(),
-                    new PrioritySelector(
-                        Spell.WaitForGcdOrCastOrChannel(),
-                        Item.CreateUseAlchemyBuffsBehavior(),
-                // Generic.CreateFlasksBehaviour(),
-                        new HookExecutor(BehaviorType.PreCombatBuffs.ToString())
+                new CallWatch( "PreCombat",
+                    new Decorator(  // suppress non-combat buffing if standing around waiting on DungeonBuddy or BGBuddy queues
+                        ret => !Me.Mounted
+                            && !SingularSettings.Instance.DisableNonCombatBehaviors
+                            && AllowNonCombatBuffing(),
+                        new PrioritySelector(
+                            Spell.WaitForGcdOrCastOrChannel(),
+                            Item.CreateUseAlchemyBuffsBehavior(),
+                    // Generic.CreateFlasksBehaviour(),
+                            new HookExecutor(HookName(BehaviorType.PreCombatBuffs))
+                            )
                         )
                     )
                 );
 
             _pullBuffsBehavior = new LockSelector(
-                new Decorator(
-                    ret => AllowBehaviorUsage() && !Spell.IsGlobalCooldown() && !Spell.IsCastingOrChannelling(),
-                    new HookExecutor(BehaviorType.PullBuffs.ToString())
+                new CallWatch("PullBuffs",
+                    new Decorator(
+                        ret => AllowBehaviorUsage() && !Spell.IsGlobalCooldown() && !Spell.IsCastingOrChannelling(),
+                        new HookExecutor(HookName(BehaviorType.PullBuffs))
+                        )
                     )
                 );
 
             _combatBuffsBehavior = new LockSelector(
-                new Decorator(
-                    ret => AllowBehaviorUsage() && !Spell.IsGlobalCooldown() && !Spell.IsCastingOrChannelling(),
-                    new PrioritySelector(
-                        new Decorator(ret => !HotkeyDirector.IsCombatEnabled, new ActionAlwaysSucceed()),
-                        Generic.CreateUseTrinketsBehaviour(),
-                        Generic.CreatePotionAndHealthstoneBehavior(),
-                        Generic.CreateRacialBehaviour(),
-                        new HookExecutor(BehaviorType.CombatBuffs.ToString())
+                new CallWatch("CombatBuffs",
+                    new Decorator(
+                        ret => AllowBehaviorUsage() && !Spell.IsGlobalCooldown() && !Spell.IsCastingOrChannelling(),
+                        new PrioritySelector(
+                            new Decorator(ret => !HotkeyDirector.IsCombatEnabled, new ActionAlwaysSucceed()),
+                            Generic.CreateUseTrinketsBehaviour(),
+                            Generic.CreatePotionAndHealthstoneBehavior(),
+                            Generic.CreateRacialBehaviour(),
+                            new HookExecutor(HookName(BehaviorType.CombatBuffs))
+                            )
                         )
                     )
                 );
 
             _healBehavior = new LockSelector(
-                _lostControlBehavior,
-                new Decorator(
-                    ret => Kite.IsKitingActive(),
-                    new HookExecutor("KitingBehavior")
-                    ),
-                new Decorator(
-                    ret => AllowBehaviorUsage() && !Spell.IsGlobalCooldown() && !Spell.IsCastingOrChannelling(),
-                    new HookExecutor(BehaviorType.Heal.ToString())
+                new CallWatch("Heal",
+                    _lostControlBehavior,
+                    new Decorator(
+                        ret => Kite.IsKitingActive(),
+                        new HookExecutor(HookName("KitingBehavior"))
+                        ),
+                    new Decorator(
+                        ret => AllowBehaviorUsage() && !Spell.IsGlobalCooldown() && !Spell.IsCastingOrChannelling(),
+                        new HookExecutor(HookName(BehaviorType.Heal))
+                        )
                     )
                 );
 
             _pullBehavior = new LockSelector(
-                new Decorator(
-                    ret => AllowBehaviorUsage(), // && (!Me.GotTarget || !Blacklist.Contains(Me.CurrentTargetGuid, BlacklistFlags.Combat)),
-                    new PrioritySelector(
-                        new Decorator(
-                            ret => !HotkeyDirector.IsCombatEnabled,
-                            new ActionAlwaysSucceed()
-                            ),
-                        new Action(r => { MonitorQuestingPullDistance(); return RunStatus.Failure; }),
-#if BOTS_NOT_CALLING_PULLBUFFS
-                        _pullBuffsBehavior,
-#endif
-                        CreateLogTargetChanges("<<< PULL >>>"),
-                        new HookExecutor(BehaviorType.Pull.ToString())
+                new CallWatch("Pull",
+                    new Decorator(
+                        ret => AllowBehaviorUsage(), // && (!Me.GotTarget || !Blacklist.Contains(Me.CurrentTargetGuid, BlacklistFlags.Combat)),
+                        new PrioritySelector(
+                            new Decorator(
+                                ret => !HotkeyDirector.IsCombatEnabled,
+                                new ActionAlwaysSucceed()
+                                ),
+    #if BOTS_NOT_CALLING_PULLBUFFS
+                            _pullBuffsBehavior,
+    #endif
+                            CreateLogTargetChanges( BehaviorType.Pull, "<<< PULL >>>"),
+                            new HookExecutor(HookName(BehaviorType.Pull))
+                            )
                         )
                     )
                 );
 
             _combatBehavior = new LockSelector(
-                new Decorator(
-                    ret => AllowBehaviorUsage(), // && (!Me.GotTarget || !Blacklist.Contains(Me.CurrentTargetGuid, BlacklistFlags.Combat)),
-                    new PrioritySelector(
-                        new Decorator(
-                            ret => !HotkeyDirector.IsCombatEnabled,
-                            new ActionAlwaysSucceed()
-                            ),
-                        CreateLogTargetChanges("<<< ADD >>>"),
-                        new HookExecutor(BehaviorType.Combat.ToString())
+                new CallWatch("Combat",
+                    new Decorator(
+                        ret => AllowBehaviorUsage(), // && (!Me.GotTarget || !Blacklist.Contains(Me.CurrentTargetGuid, BlacklistFlags.Combat)),
+                        new PrioritySelector(
+                            new Decorator(
+                                ret => !HotkeyDirector.IsCombatEnabled,
+                                new ActionAlwaysSucceed()
+                                ),
+                            CreateLogTargetChanges( BehaviorType.Combat, "<<< ADD >>>"),
+                            new HookExecutor(HookName(BehaviorType.Combat))
+                            )
                         )
                     )
                 );
+
+            _deathBehavior = new LockSelector(
+                new CallWatch("Death",
+                    new Decorator(
+                        ret => AllowBehaviorUsage(),
+                        new PrioritySelector(
+                            new Action( r => ResetCurrentTarget() ),
+                            Spell.WaitForGcdOrCastOrChannel(),
+                            new HookExecutor(HookName(BehaviorType.Death))
+                            )
+                        )
+                    )
+                );
+
         }
+
+        private static bool HaveWeLostControl
+        { 
+            get
+            {
+                return Me.Fleeing || Me.Stunned;
+            } 
+        }
+
+        internal static string HookName(string name)
+        {
+            return "Singular." + name;
+        }
+
+        internal static string HookName(BehaviorType typ)
+        {
+            return "Singular." + typ.ToString();
+        }
+
+        static bool _inQuestVehicle = false;
+
+        static bool _inPetCombat = false;
 
         private static bool AllowBehaviorUsage()
         {
-#if TESTING_WHILE_IN_VEHICLE_COMPLETED
-            return (!IsQuestBotActive || !Me.InVehicle) && (!Me.IsOnTransport || Me.Transport.Entry == 56171);
-#else
-            // The boss 'Elegon' sits on a transport, this is just one of several examples why bot needs to fight back when on a transport while in an dungeon.
-            // return (IsDungeonBuddyActive || !Me.IsOnTransport || Me.Transport.Entry == 56171 || Me.IsInInstance);
+            // Opportunity alert -- the decision whether a Combat Routine should fight or not
+            // .. should be made by the caller (BotBase, Quest Behavior, Plugin, etc.) 
+            // .. The only reason for calling a Combat Routine is combat.  Anytime we have to
+            // .. add this conditional check in the Combat Routine it should be a singlar that
+            // .. role/responsibility boundaries are being violated
+
+            // disable if Questing and in a Quest Vehicle (now requires setting as well)
+            if (IsQuestBotActive)
+            {
+                if (_inQuestVehicle != Me.InVehicle)
+                {
+                    _inQuestVehicle = Me.InVehicle; 
+                    if (_inQuestVehicle )
+                    {
+                        Logger.Write(Color.White, "Singular is {0} while in a Quest Vehicle", SingularSettings.Instance.DisableInQuestVehicle ? "Disabled" : "Enabled");
+                        Logger.Write(Color.White, "See the [Disable in Quest Vehicle]={0} setting to change", SingularSettings.Instance.DisableInQuestVehicle);
+                    }
+                }
+
+                if (_inQuestVehicle && SingularSettings.Instance.DisableInQuestVehicle)
+                    return false;
+            }
+
+            // disable if in pet battle and using a plugin/botbase 
+            //  ..  that doesn't prevent combat routine from being called
+            //  ..  note: this won't allow pet combat to work correclty, it 
+            //  ..  only prevents failed movement/spell cast messages from Singular
+            //  ..  Pet Combat component to prevent calls to combat routine  as it
+            //  ..  has no role in pet combat
+            if (!Me.CurrentMap.IsRaid)
+            {
+                if (_inPetCombat != PetBattleInProgress())
+                {
+                    _inPetCombat = PetBattleInProgress();
+                    if (_inPetCombat)
+                    {
+                        Logger.Write(Color.White, "Behaviors disabled in Pet Fight");
+                    }
+                }
+
+                if (_inPetCombat)
+                    return false;
+            }
+
             return true;
-#endif
         }
 
         private static bool AllowNonCombatBuffing()
         {
+            // Opportunity alert -- bots that sit still waiting for a queue to pop
+            // .. should avoid calling PreCombatbuff, since it looks odd for long queue times
+            // .. for a toon to stay stationary but renew a buff immediately as it expires.
+
             if (IsBgBotActive && !Battlegrounds.IsInsideBattleground)
                 return false;
 
@@ -271,18 +398,30 @@ namespace Singular
             return true;
         }
 
+        private static bool PetBattleInProgress()
+        {
+            try
+            {
+                return 1 == Lua.GetReturnVal<int>("return C_PetBattles.IsInBattle()", 0);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         /// <summary>
         /// Ensures we have a composite for the given BehaviorType.  
         /// </summary>
         /// <param name="error">true: report error if composite not found, false: allow null composite</param>
         /// <param name="type">BehaviorType that should be loaded</param>
         /// <returns>true: composite loaded and saved to hook, false: failure</returns>
-        private bool EnsureComposite(bool error, WoWContext context, BehaviorType type)
+        private bool EnsureComposite(bool silent, bool error, WoWContext context, BehaviorType type)
         {
             int count = 0;
             Composite composite;
 
-            Logger.WriteDebug("Creating " + type + " behavior.");
+            // Logger.WriteDebug("Creating " + type + " behavior.");
 
             composite = CompositeBuilder.GetComposite(Class, TalentManager.CurrentSpec, type, context, out count);
 
@@ -293,7 +432,7 @@ namespace Singular
                     composite = Helpers.Rest.CreateDefaultRestBehaviour();
             }
 
-            TreeHooks.Instance.ReplaceHook(type.ToString(), composite);
+            TreeHooks.Instance.ReplaceHook(HookName(type), composite);
 
             if ((composite == null || count <= 0) && error)
             {
@@ -304,50 +443,70 @@ namespace Singular
             return composite != null;
         }
 
-        private static Composite CreateLogTargetChanges(string sType)
+        public static void ResetCurrentTargetTimer()
+        {
+            _timerLastTarget.Reset();
+            if (SingularSettings.Debug)
+                Logger.WriteDebug("reset target timer to {0:c}", _timerLastTarget.TimeLeft);
+        }
+
+        public static void ResetCurrentTarget()
+        {
+            _guidLastTarget = 0;
+        }
+
+        private static Composite CreateLogTargetChanges(BehaviorType behav, string sType)
         {
             return new Action(r =>
                 {
                     // there are moments where CurrentTargetGuid != 0 but CurrentTarget == null. following
                     // .. tries to handle by only checking CurrentTarget reference and treating null as guid = 0
-                    if ((SingularSettings.Debug && Me.CurrentTargetGuid != _guidLastTarget))
+                    if (Me.CurrentTargetGuid != _guidLastTarget)
                     {
-                        if (Me.CurrentTarget == null)
+                        if (Me.CurrentTargetGuid == 0)
                         {
                             if (_guidLastTarget != 0)
                             {
-                                Logger.WriteDebug(sType + " CurrentTarget now: (null)");
+                                if (SingularSettings.Debug)
+                                    Logger.WriteDebug(sType + " CurrentTarget now: (null)");
                                 _guidLastTarget = 0;
                             }
                         }
                         else
                         {
                             _guidLastTarget = Me.CurrentTargetGuid;
-
-                            string info = "";
-                            WoWUnit target = Me.CurrentTarget;
-
-                            if (Styx.CommonBot.POI.BotPoi.Current.Guid == Me.CurrentTargetGuid)
-                                info += string.Format(", IsBotPoi={0}", Styx.CommonBot.POI.BotPoi.Current.Type);
-
-                            if (Styx.CommonBot.Targeting.Instance.TargetList.Contains(Me.CurrentTarget))
-                                info += string.Format(", TargetIndex={0}", Styx.CommonBot.Targeting.Instance.TargetList.IndexOf(Me.CurrentTarget) + 1);
-
-                            Logger.WriteDebug(sType + " CurrentTarget now: {0} h={1:F1}%, maxh={2}, d={3:F1} yds, box={4:F1}, player={5}, hostile={6}, faction={7}, loss={8}, facing={9}" + info,
-                                target.SafeName(),
-                                target.HealthPercent,
-                                target.MaxHealth,
-                                target.Distance,
-                                target.CombatReach,
-                                target.IsPlayer.ToYN(),
-                                target.IsHostile.ToYN(),
-                                target.FactionId ,
-                                target.InLineOfSpellSight.ToYN(),
-                                Me.IsSafelyFacing(target).ToYN()
-                                );
+                            ResetCurrentTargetTimer();
+                            LogTargetChanges(behav, sType);
                         }
+                    }
+                    // we have some type of target
+                    else if (Me.CurrentTarget != null && !MovementManager.IsMovementDisabled && SingularRoutine.CurrentWoWContext == WoWContext.Normal)  
+                    {       
+                        // make sure we get into melee range within reasonable time
+                        if ((!Me.IsMelee() || Me.CurrentTarget.IsWithinMeleeRange) && Movement.InLineOfSpellSight(Me.CurrentTarget, 5000))
+                        {
+                            ResetCurrentTargetTimer();
+                        }
+                        else if (_timerLastTarget.IsFinished)
+                        {
+                            BlacklistFlags blf = Me.CurrentTarget.Aggro || (Me.GotAlivePet && Me.CurrentTarget.PetAggro) ? BlacklistFlags.Combat : BlacklistFlags.Pull;
+                            if (!Blacklist.Contains(_guidLastTarget, blf))
+                            {
+                                TimeSpan bltime = TimeSpan.FromMinutes(5);
 
-                        _timerLastTarget.Reset();
+                                Logger.Write(Color.HotPink, "{0} Target {1} out of range/line of sight for {2:F1} seconds, blacklisting for {3:c} and clearing {4}", 
+                                    blf, 
+                                    Me.CurrentTarget.SafeName(), 
+                                    _timerLastTarget.WaitTime.TotalSeconds, 
+                                    bltime,
+                                    _guidLastTarget == BotPoi.Current.Guid ? "BotPoi" : "Current Target" );
+
+                                Blacklist.Add(_guidLastTarget, blf, TimeSpan.FromMinutes(5));
+                                if (_guidLastTarget == BotPoi.Current.Guid)
+                                    BotPoi.Clear("Clearing Blacklisted BotPoi");
+                                Me.ClearTarget();
+                            }
+                        }
                     }
 
                     return RunStatus.Failure;
@@ -355,33 +514,43 @@ namespace Singular
 
         }
 
-        private static void MonitorQuestingPullDistance()
+        private static void LogTargetChanges(BehaviorType behav, string sType)
         {
-            if (SingularRoutine.IsQuestBotActive && SingularSettings.Instance.PullDistanceOverride == CharacterSettings.Instance.PullDistance)
+            if (!SingularSettings.Debug)
+                return;
+
+            string info = "";
+            WoWUnit target = Me.CurrentTarget;
+
+            if (Styx.CommonBot.POI.BotPoi.Current.Guid == Me.CurrentTargetGuid)
+                info += string.Format(", IsBotPoi={0}", Styx.CommonBot.POI.BotPoi.Current.Type);
+
+            if (Styx.CommonBot.Targeting.Instance.TargetList.Contains(Me.CurrentTarget))
+                info += string.Format(", TargetIndex={0}", Styx.CommonBot.Targeting.Instance.TargetList.IndexOf(Me.CurrentTarget) + 1);
+
+            Logger.WriteDebug(sType + " CurrentTarget now: {0} h={1:F1}%, maxh={2}, d={3:F1} yds, box={4:F1}, player={5}, hostil={6}, faction={7}, loss={8}, face={9}, agro={10}" + info,
+                target.SafeName(),
+                target.HealthPercent,
+                target.MaxHealth,
+                target.Distance,
+                target.CombatReach,
+                target.IsPlayer.ToYN(),
+                target.IsHostile.ToYN(),
+                target.FactionId,
+                target.InLineOfSpellSight.ToYN(),
+                Me.IsSafelyFacing(target).ToYN(),
+                target.Aggro.ToYN() + (!Me.GotAlivePet ? "" : ", pagro=" + target.PetAggro.ToYN())
+                );
+        }
+
+        private static int _prevPullDistance = -1;
+
+        private static void MonitorPullDistance()
+        {
+            if (_prevPullDistance != CharacterSettings.Instance.PullDistance)
             {
-                int newPullDistance = 0;
-                switch (Me.Class)
-                {
-                    case WoWClass.DeathKnight:
-                    case WoWClass.Monk:
-                    case WoWClass.Paladin:
-                    case WoWClass.Rogue:
-                    case WoWClass.Warrior:
-                        break;
-
-                    default:
-                        if (Me.Specialization == WoWSpec.None || Me.Specialization == WoWSpec.DruidFeral || Me.Specialization == WoWSpec.DruidGuardian || Me.Specialization == WoWSpec.ShamanEnhancement)
-                            break;
-
-                        newPullDistance = 40;
-                        break;
-                }
-
-                if (newPullDistance != 0)
-                {
-                    Logger.Write(Color.White, "Quest Profile set Pull Distance to {0}, forcing to {1} for next Pull", CharacterSettings.Instance.PullDistance, newPullDistance);
-                    CharacterSettings.Instance.PullDistance = newPullDistance;
-                }
+                _prevPullDistance = CharacterSettings.Instance.PullDistance;
+                Logger.Write(Color.White, "attention: Pull Distance set to {0} yds by {1}, Plug-in, Profile, or User", _prevPullDistance, GetBotName());
             }
         }
 
@@ -393,20 +562,206 @@ namespace Singular
         /// </summary>
         private class LockSelector : PrioritySelector
         {
+            delegate RunStatus TickDelegate(object context);
+
+            TickDelegate _TickSelectedByUser;
+
             public LockSelector(params Composite[] children)
                 : base(children)
             {
+                if (SingularSettings.Instance.UseFrameLock)
+                    _TickSelectedByUser = TickWithFrameLock;
+                else
+                    _TickSelectedByUser = TickNoFrameLock;
             }
 
             public override RunStatus Tick(object context)
+            {
+                return _TickSelectedByUser(context);
+            }
+
+            private RunStatus TickWithFrameLock(object context)
             {
                 using (StyxWoW.Memory.AcquireFrame())
                 {
                     return base.Tick(context);
                 }
             }
+
+            private RunStatus TickNoFrameLock(object context)
+            {
+                return base.Tick(context);
+            }
+
         }
 
         #endregion
+    }
+
+
+    public class CallWatch : PrioritySelector
+    {
+        public static DateTime LastCall { get; set; }
+        public static ulong CountCall { get; set; }
+        public static double WarnTime { get; set; }
+        public static TimeSpan SinceLast
+        {
+            get
+            {
+                TimeSpan since;
+                if (LastCall == DateTime.MinValue)
+                    since = TimeSpan.Zero;
+                else
+                    since = DateTime.Now - LastCall;
+                return since;
+            }
+        }
+
+        public string Name { get; set; }
+
+        private static bool _init = false;
+
+        private static void Initialize()
+        {
+            if (_init)
+                return;
+
+            _init = true;
+            LastCall = DateTime.MinValue;
+
+            SingularRoutine.OnBotEvent += (src, arg) =>
+            {
+                // reset time on Start
+                if (arg.Event == SingularBotEvent.BotStart)
+                    LastCall = DateTime.Now;
+                else if (arg.Event == SingularBotEvent.BotStop)
+                {
+                    TimeSpan since = SinceLast;
+                    if (since.TotalSeconds >= WarnTime)
+                    {
+                        if (SingularSettings.Debug)
+                            Logger.WriteDebug(Color.HotPink, "warning: {0:F1} seconds since BotBase last called Singular (now in OnBotStop)", since.TotalSeconds);
+                        else
+                            Logger.WriteFile("warning: {0:F1} seconds since BotBase last called Singular (now in OnBotStop)", since.TotalSeconds);
+                    }
+                }
+            };
+        }
+
+        public CallWatch(string name, params Composite[] children)
+            : base(children)
+        {
+            Initialize();
+
+            if (WarnTime == 0)
+                WarnTime = 5;
+
+            Name = name;
+        }
+        /*
+        protected override IEnumerable<RunStatus> Execute(object context)
+        {
+            IEnumerable<RunStatus> ret;
+            CountCall++;
+
+            if (SingularSettings.Debug)
+            {
+                if ((DateTime.Now - LastCall).TotalSeconds > WarnTime && LastCall != DateTime.MinValue)
+                    Logger.WriteDebug(Color.HotPink, "warning: {0:F1} seconds since BotBase last called Singular (now in {1})", (DateTime.Now - LastCall).TotalSeconds, Name);
+            }
+
+            if (!CallTrace)
+            {
+                ret = base.Execute(context);
+            }
+            else
+            {
+                DateTime started = DateTime.Now;
+                Logger.Write(Color.DodgerBlue, "enter: {0}", Name);
+                ret = base.Execute(context);
+                Logger.Write(Color.DodgerBlue, "leave: {0}, took {1} ms", Name, (ulong)(DateTime.Now - started).TotalMilliseconds);
+            }
+
+            LastCall = DateTime.Now;
+            return ret;
+        }
+        */
+        public override RunStatus Tick(object context)
+        {
+            RunStatus ret;
+            CountCall++;
+
+            if (SingularSettings.Debug)
+            {
+                TimeSpan since = SinceLast;
+                if (since.TotalSeconds > WarnTime && LastCall != DateTime.MinValue)
+                    Logger.WriteDebug(Color.HotPink, "warning: {0:F1} seconds since BotBase last called Singular (now in {1})", since.TotalSeconds, Name);
+            }
+
+            if (!SingularSettings.Trace )
+            {
+                ret = base.Tick(context);
+            }
+            else
+            {
+                DateTime started = DateTime.Now;
+                Logger.WriteDebug(Color.DodgerBlue, "enter: {0}", Name);
+                ret = base.Tick(context);
+                Logger.WriteDebug(Color.DodgerBlue, "leave: {0}, took {1} ms", Name, (ulong)(DateTime.Now - started).TotalMilliseconds);
+            }
+
+            LastCall = DateTime.Now;
+            return ret;
+        }
+
+    }
+
+    public class CallTrace : PrioritySelector
+    {
+        public static DateTime LastCall { get; set; }
+        public static ulong CountCall { get; set; }
+        public static bool TraceActive { get { return SingularSettings.Trace; } }
+
+        public string Name { get; set; }
+
+        private static bool _init = false;
+
+        private static void Initialize()
+        {
+            if (_init)
+                return;
+
+            _init = true;
+        }
+
+        public CallTrace(string name, params Composite[] children)
+            : base(children)
+        {
+            Initialize();
+
+            Name = name;
+            LastCall = DateTime.MinValue;
+        }
+
+        public override RunStatus Tick(object context)
+        {
+            RunStatus ret;
+            CountCall++;
+
+            if (!TraceActive )
+            {
+                ret = base.Tick(context);
+            }
+            else
+            {
+                DateTime started = DateTime.Now;
+                Logger.WriteDebug(Color.LightBlue, "... enter: {0}", Name);
+                ret = base.Tick(context);
+                Logger.WriteDebug(Color.LightBlue, "... leave: {0}, took {1} ms", Name, (ulong)(DateTime.Now - started).TotalMilliseconds);
+            }
+
+            return ret;
+        }
+
     }
 }

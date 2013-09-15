@@ -43,9 +43,7 @@ namespace Singular.ClassSpecific.Paladin
         public static Composite CreatePaladinProtectionPull()
         {
             return new PrioritySelector(
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown(),
                     new PrioritySelector(
@@ -65,54 +63,74 @@ namespace Singular.ClassSpecific.Paladin
         public static Composite CreatePaladinProtectionCombatBuffs()
         {
             return new PrioritySelector(
+                Spell.BuffSelf("Devotion Aura", req => Me.Silenced),
+
                 // Seal twisting. If our mana gets stupid low, just throw on insight to get some mana back quickly, then put our main seal back on.
                 // This is Seal of Truth once we get it, Righteousness when we dont.
                 Common.CreatePaladinSealBehavior(),
 
-                // Defensive
-                Spell.BuffSelf("Sacred Shield"),
+                new Decorator(
+                    req => !Unit.IsTrivial(Me.CurrentTarget),
+                    new PrioritySelector(
 
-                Spell.BuffSelf("Hand of Freedom",
-                    ret => Me.HasAuraWithMechanic(WoWSpellMechanic.Dazed,
-                                                            WoWSpellMechanic.Disoriented,
-                                                            WoWSpellMechanic.Frozen,
-                                                            WoWSpellMechanic.Incapacitated,
-                                                            WoWSpellMechanic.Rooted,
-                                                            WoWSpellMechanic.Slowed,
-                                                            WoWSpellMechanic.Snared)),
+                        // Defensive
+                        Spell.BuffSelf("Hand of Freedom",
+                            ret => Me.HasAuraWithMechanic(WoWSpellMechanic.Dazed,
+                                                                    WoWSpellMechanic.Disoriented,
+                                                                    WoWSpellMechanic.Frozen,
+                                                                    WoWSpellMechanic.Incapacitated,
+                                                                    WoWSpellMechanic.Rooted,
+                                                                    WoWSpellMechanic.Slowed,
+                                                                    WoWSpellMechanic.Snared)),
 
-                Spell.BuffSelf("Divine Shield",
-                    ret => Me.CurrentMap.IsBattleground && Me.HealthPercent <= 20 && !Me.HasAura("Forbearance")),
+                        Spell.BuffSelf("Sacred Shield"),
 
+                        Spell.BuffSelf("Divine Shield",
+                            ret => Me.CurrentMap.IsBattleground && Me.HealthPercent <= 20 && !Me.HasAura("Forbearance")),
+
+                        Spell.BuffSelf(
+                            "Divine Protection",
+                            ret => Me.HealthPercent <= PaladinSettings.DivineProtectionHealthProt),
+
+                    // Symbiosis
+                        Spell.BuffSelf(
+                            "Barkskin",
+                            ret => Me.HealthPercent <= PaladinSettings.DivineProtectionHealthProt
+                                && !Me.HasAura("Divine Protection")
+                                && Spell.GetSpellCooldown("Divine Protection", 6).TotalSeconds > 0),
+
+                        Spell.BuffSelf(
+                            "Guardian of Ancient Kings",
+                            ret => Me.HealthPercent <= PaladinSettings.GoAKHealth),
+
+                        Spell.BuffSelf(
+                            "Ardent Defender",
+                            ret => Me.HealthPercent <= PaladinSettings.ArdentDefenderHealth)
+                        )
+                    ),
+
+                // Heal up after Defensive CDs used if needed
                 Spell.BuffSelf( "Lay on Hands",
-                    ret => Me.HealthPercent <= PaladinSettings.LayOnHandsHealth && !Me.HasAura("Forbearance")),
+                    ret => Me.HealthPercent <= PaladinSettings.SelfLayOnHandsHealth && !Me.HasAura("Forbearance")),
 
-                Spell.BuffSelf("Avenging Wrath", 
-                    ret => Me.CurrentTarget.IsWithinMeleeRange && (Me.CurrentTarget.TimeToDeath() > 25 || _aoeCount > 1)),
+                Common.CreateWordOfGloryBehavior(on => Me),
 
-                Spell.BuffSelf(
-                    "Guardian of Ancient Kings",
-                    ret => Me.HealthPercent <= PaladinSettings.GoAKHealth),
+                Spell.Cast("Flash of Light",
+                    mov => false,
+                    on => Me,
+                    req => SingularRoutine.CurrentWoWContext != WoWContext.Instances && Me.GetPredictedHealthPercent(true) <= PaladinSettings.SelfFlashOfLightHealth,
+                    cancel => Me.HealthPercent > 90),
 
-                Spell.BuffSelf(
-                    "Ardent Defender",
-                    ret => Me.HealthPercent <= PaladinSettings.ArdentDefenderHealth),
+                // now any Offensive CDs
+                new Decorator(
+                    req => !Unit.IsTrivial(Me.CurrentTarget),
+                    new PrioritySelector(
 
-                Spell.BuffSelf(
-                    "Divine Protection",
-                    ret => Me.HealthPercent <= PaladinSettings.DivineProtectionHealthProt),
+                        Spell.BuffSelf("Avenging Wrath", 
+                            ret => (Me.GotTarget && Me.CurrentTarget.IsWithinMeleeRange && (Me.CurrentTarget.TimeToDeath() > 25) || _aoeCount > 1))
 
-            // Symbiosis
-                Spell.BuffSelf(
-                    "Barkskin",
-                    ret => Me.HealthPercent <= PaladinSettings.DivineProtectionHealthProt
-                        && !Me.HasAura("Divine Protection")
-                        && Spell.GetSpellCooldown("Divine Protection", 6).TotalSeconds > 0),
-
-                Spell.BuffSelf("Word of Glory",
-                    ret => Me.HealthPercent < 50 && (Me.CurrentHolyPower >= 3 || Me.ActiveAuras.ContainsKey("Divine Purpose"))
-                        || Me.HealthPercent < 25 && Me.CurrentHolyPower == 2
-                        || Me.HealthPercent < 15 && Me.CurrentHolyPower == 1)
+                        )
+                    )
                 );
         }
 
@@ -120,9 +138,7 @@ namespace Singular.ClassSpecific.Paladin
         public static Composite CreateProtectionCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
                 Spell.WaitForCastOrChannel(),
 
                 new Decorator(
@@ -205,7 +221,6 @@ namespace Singular.ClassSpecific.Paladin
                 return new Action(ret => { return RunStatus.Failure; });
 
             return new Sequence(
-                new Action(r => SingularRoutine.UpdateDiagnosticCastingState()),
                 new ThrottlePasses(1, 1,
                     new Action(ret =>
                     {

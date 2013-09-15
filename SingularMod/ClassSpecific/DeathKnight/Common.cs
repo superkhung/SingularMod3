@@ -43,24 +43,9 @@ namespace Singular.ClassSpecific.DeathKnight
             get { return Me.Minions.Any(u => u.Entry == Ghoul); }
         }
 
-        internal static bool UseLongCoolDownAbility
+        internal static void DestroyGhoulMinion()
         {
-            get
-            {
-                if ( !Me.GotTarget)
-                    return false;
-
-                if (SingularRoutine.CurrentWoWContext == WoWContext.Instances)
-                    return Me.CurrentTarget.IsBoss();
-
-                if (Me.CurrentTarget.IsPlayer)
-                    return Me.CurrentTarget.TimeToDeath() > 3;
-
-                if (Me.CurrentTarget.TimeToDeath() > 20)
-                    return true;
-
-                return Unit.NearbyUnitsInCombatWithMe.Any( u => u.Guid != Me.CurrentTargetGuid);
-            }
+            Lua.DoString("DestroyTotem(1)");
         }
 
         internal static bool ShouldSpreadDiseases
@@ -104,9 +89,8 @@ namespace Singular.ClassSpecific.DeathKnight
         public static Composite CreateDeathKnightNormalAndPvPPull()
         {
             return new PrioritySelector(
-                Movement.CreateMoveToLosBehavior(), 
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
+
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
                 Spell.WaitForCastOrChannel(),
 
                 new Decorator(
@@ -131,15 +115,18 @@ namespace Singular.ClassSpecific.DeathKnight
         [Behavior(BehaviorType.Pull, WoWClass.DeathKnight, WoWSpec.DeathKnightFrost, WoWContext.Instances)]
         public static Composite CreateDeathKnightFrostAndUnholyInstancePull()
         {
-            return
-                new PrioritySelector(
-                    Movement.CreateMoveToLosBehavior(),
-                    Movement.CreateFaceTargetBehavior(),
-                    Helpers.Common.CreateDismount("Pulling"),
-                    Spell.Cast("Howling Blast"),
-                    Spell.Cast("Icy Touch"),
-                    Movement.CreateMoveToMeleeBehavior(true)
-                    );
+            return new PrioritySelector(
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
+                Spell.WaitForCastOrChannel(),
+                new Decorator( 
+                    ret => !Spell.IsGlobalCooldown(),
+                        new PrioritySelector(
+                        Spell.Cast("Howling Blast"),
+                        Spell.Cast("Icy Touch")
+                        )
+                    ),
+                Movement.CreateMoveToMeleeBehavior(true)
+                );
         }
 
         #endregion
@@ -196,9 +183,7 @@ namespace Singular.ClassSpecific.DeathKnight
                 ret => !Spell.IsGlobalCooldown() && !Spell.IsCastingOrChannelling(),
                 new PrioritySelector(
 
-                    Spell.BuffSelf("Death Coil",
-                        ret => Me.HasAura("Lichborne")
-                            && Me.HealthPercent < Settings.LichbornePercent),
+                    Spell.Cast("Death Coil", on => Me, ret => Me.HasAura("Lichborne") && Me.HealthPercent < Settings.LichbornePercent),
 
                     Spell.BuffSelf("Death Pact",
                         ret => Common.HasTalent( DeathKnightTalents.DeathPact) 
@@ -252,59 +237,62 @@ namespace Singular.ClassSpecific.DeathKnight
         [Behavior(BehaviorType.CombatBuffs, WoWClass.DeathKnight, WoWSpec.DeathKnightFrost)]
         public static Composite CreateDeathKnightCombatBuffs()
         {
-            return new PrioritySelector(
-                // *** Defensive Cooldowns ***
-                // Anti-magic shell - no cost and doesnt trigger GCD 
-                    Spell.BuffSelf("Anti-Magic Shell",
-                                   ret => Unit.NearbyUnfriendlyUnits.Any(u =>
-                                                                         (u.IsCasting || u.ChanneledCastingSpellId != 0) &&
-                                                                         u.CurrentTargetGuid == Me.Guid)),
-                // we want to make sure our primary target is within melee range so we don't run outside of anti-magic zone.
-                    Spell.CastOnGround("Anti-Magic Zone", ctx => Me.Location,
-                                       ret => Common.HasTalent( DeathKnightTalents.AntiMagicZone) &&
-                                              !Me.HasAura("Anti-Magic Shell") &&
-                                              Unit.NearbyUnfriendlyUnits.Any(u =>
-                                                                             (u.IsCasting ||
-                                                                              u.ChanneledCastingSpellId != 0) &&
-                                                                             u.CurrentTargetGuid == Me.Guid) &&
-                                              Targeting.Instance.FirstUnit != null &&
-                                              Targeting.Instance.FirstUnit.IsWithinMeleeRange),
+            return new Decorator(
+                req => !Me.GotTarget || !Me.CurrentTarget.IsTrivial(),
+                new PrioritySelector(
+                    // *** Defensive Cooldowns ***
+                    // Anti-magic shell - no cost and doesnt trigger GCD 
+                        Spell.BuffSelf("Anti-Magic Shell",
+                                       ret => Unit.NearbyUnfriendlyUnits.Any(u =>
+                                                                             (u.IsCasting || u.ChanneledCastingSpellId != 0) &&
+                                                                             u.CurrentTargetGuid == Me.Guid)),
+                    // we want to make sure our primary target is within melee range so we don't run outside of anti-magic zone.
+                        Spell.CastOnGround("Anti-Magic Zone", ctx => Me.Location,
+                                           ret => Common.HasTalent( DeathKnightTalents.AntiMagicZone) &&
+                                                  !Me.HasAura("Anti-Magic Shell") &&
+                                                  Unit.NearbyUnfriendlyUnits.Any(u =>
+                                                                                 (u.IsCasting ||
+                                                                                  u.ChanneledCastingSpellId != 0) &&
+                                                                                 u.CurrentTargetGuid == Me.Guid) &&
+                                                  Targeting.Instance.FirstUnit != null &&
+                                                  Targeting.Instance.FirstUnit.IsWithinMeleeRange),
 
-                    Spell.BuffSelf("Icebound Fortitude", ret => Me.HealthPercent < Settings.IceboundFortitudePercent),
+                        Spell.BuffSelf("Icebound Fortitude", ret => Me.HealthPercent < Settings.IceboundFortitudePercent),
 
-                    Spell.BuffSelf("Lichborne", ret => Me.IsCrowdControlled()),
+                        Spell.BuffSelf("Lichborne", ret => Me.IsCrowdControlled()),
 
-                    Spell.BuffSelf("Desecrated Ground", ret => Common.HasTalent( DeathKnightTalents.DesecratedGround) && Me.IsCrowdControlled()),
+                        Spell.BuffSelf("Desecrated Ground", ret => Common.HasTalent( DeathKnightTalents.DesecratedGround) && Me.IsCrowdControlled()),
                     
-                    CreateRaiseAllyBehavior( on => Unit.NearbyGroupMembers.FirstOrDefault( u=> u.IsDead && u.DistanceSqr < 40 * 40 && u.InLineOfSpellSight)),
+                        Helpers.Common.CreateCombatRezBehavior("Raise Ally", on => ((WoWUnit)on).SpellDistance() < 40 && ((WoWUnit)on).InLineOfSpellSight),
 
-                    // *** Offensive Cooldowns ***
+                        // *** Offensive Cooldowns ***
 
-                    // I'm unholy and I don't have a pet or I am blood/frost and I am using pet as dps bonus
-                    Spell.BuffSelf("Raise Dead",
-                        ret => (TalentManager.CurrentSpec == WoWSpec.DeathKnightUnholy && !Me.GotAlivePet) 
-                            || (TalentManager.CurrentSpec == WoWSpec.DeathKnightFrost && Settings.UseGhoulAsDpsCdFrost && !GhoulMinionIsActive)),
+                        // I'm unholy and I don't have a pet or I am blood/frost and I am using pet as dps bonus
+                        Spell.BuffSelf("Raise Dead",
+                            ret => (TalentManager.CurrentSpec == WoWSpec.DeathKnightUnholy && !Me.GotAlivePet) 
+                                || (TalentManager.CurrentSpec == WoWSpec.DeathKnightFrost && Settings.UseGhoulAsDpsCdFrost && !GhoulMinionIsActive)),
 
-                    // never use army of the dead in instances if not blood specced unless you have the army of the dead glyph to take away the taunting
-                    Spell.BuffSelf("Army of the Dead", 
-                        ret => Settings.UseArmyOfTheDead 
-                            && UseLongCoolDownAbility 
-                            && (SingularRoutine.CurrentWoWContext != WoWContext.Instances || TalentManager.HasGlyph("Army of the Dead"))),
+                        // never use army of the dead in instances if not blood specced unless you have the army of the dead glyph to take away the taunting
+                        Spell.BuffSelf("Army of the Dead", 
+                            ret => Settings.UseArmyOfTheDead 
+                                && Helpers.Common.UseLongCoolDownAbility
+                                && (SingularRoutine.CurrentWoWContext != WoWContext.Instances || TalentManager.HasGlyph("Army of the Dead"))),
 
-                    Spell.BuffSelf("Empower Rune Weapon",
-                            ret => UseLongCoolDownAbility && Me.RunicPowerPercent < 70 && ActiveRuneCount == 0),
+                        Spell.BuffSelf("Empower Rune Weapon",
+                                ret => Helpers.Common.UseLongCoolDownAbility && Me.RunicPowerPercent < 70 && ActiveRuneCount == 0),
 
-                    Spell.BuffSelf("Death's Advance",
-                        ret => Common.HasTalent( DeathKnightTalents.DeathsAdvance) 
-                            && Me.GotTarget 
-                            && (!SpellManager.CanCast("Death Grip", false) || SingularRoutine.CurrentWoWContext == WoWContext.Instances) 
-                            && Me.CurrentTarget.DistanceSqr > 10 * 10),
+                        Spell.BuffSelf("Death's Advance",
+                            ret => Common.HasTalent( DeathKnightTalents.DeathsAdvance) 
+                                && Me.GotTarget 
+                                && (!Spell.CanCastHack("Death Grip") || SingularRoutine.CurrentWoWContext == WoWContext.Instances) 
+                                && Me.CurrentTarget.DistanceSqr > 10 * 10),
 
-                    Spell.BuffSelf("Blood Tap",
-                        ret => Me.HasAura( "Blood Charge", 5) 
-                            && (BloodRuneSlotsActive == 0 || FrostRuneSlotsActive == 0 || UnholyRuneSlotsActive == 0)),
+                        Spell.BuffSelf("Blood Tap",
+                            ret => Me.HasAura( "Blood Charge", 5) 
+                                && (BloodRuneSlotsActive == 0 || FrostRuneSlotsActive == 0 || UnholyRuneSlotsActive == 0)),
 
-                    Spell.Cast("Plague Leech", ret => CanCastPlagueLeech)
+                        Spell.Cast("Plague Leech", ret => CanCastPlagueLeech)
+                    )
                 );
         }
 
@@ -318,12 +306,49 @@ namespace Singular.ClassSpecific.DeathKnight
         /// <returns></returns>
         public static Composite CreateDeathKnightPresenceBehavior()
         {
-            return new PrioritySelector(
-                Spell.BuffSelf("Frost Presence", ret => TalentManager.CurrentSpec == (WoWSpec)0),
-                Spell.BuffSelf("Frost Presence", ret => TalentManager.CurrentSpec == WoWSpec.DeathKnightFrost),
-                Spell.BuffSelf("Blood Presence", ret => TalentManager.CurrentSpec == WoWSpec.DeathKnightBlood),
-                Spell.BuffSelf("Unholy Presence", ret => TalentManager.CurrentSpec == WoWSpec.DeathKnightUnholy)
-                );
+            return Spell.BuffSelf(sp => SelectedPresence.ToString() + " Presence", req => SelectedPresence != DeathKnightPresence.None);
+        }
+
+        /// <summary>
+        /// returns the users selected Presence after validating.  return is guarranteed
+        /// to be valid for casting if != .None
+        /// </summary>
+        public static DeathKnightPresence SelectedPresence
+        {
+            get
+            {
+                var Presence = Settings.Presence;
+                if ( Presence == DeathKnightPresence.None)
+                    return Presence;
+
+                if (Presence == DeathKnightPresence.Auto)
+                {
+                    switch (Me.Specialization)
+                    {
+                        case WoWSpec.DeathKnightBlood:
+                            Presence = DeathKnightPresence.Blood;
+                            break;
+                        default:
+                        case WoWSpec.DeathKnightFrost:
+                            Presence = DeathKnightPresence.Frost;
+                            break;
+                        case WoWSpec.DeathKnightUnholy:
+                            Presence = DeathKnightPresence.Unholy ;
+                            break;
+                    }
+                }
+
+                if (!SpellManager.HasSpell(Presence.ToString() + " Presence"))
+                {
+                    Presence = DeathKnightPresence.Frost;
+                    if (!SpellManager.HasSpell(Presence.ToString() + " Presence"))
+                    {
+                        Presence = DeathKnightPresence.None;
+                    }
+                }
+
+                return Presence;
+            }
         }
 
         #endregion 
@@ -335,7 +360,10 @@ namespace Singular.ClassSpecific.DeathKnight
             return new Throttle( 1,
                 new PrioritySelector(
                     CreateDeathGripBehavior(),
-                    CreateChainsOfIceBehavior()
+                    new Decorator(
+                        ret => (Me.Combat || Me.CurrentTarget.Combat) && (Me.CurrentTarget.IsPlayer || (Me.CurrentTarget.IsMoving && !Me.CurrentTarget.IsWithinMeleeRange && Me.IsSafelyBehind(Me.CurrentTarget))),
+                        CreateChainsOfIceBehavior()
+                        )
                     )
                 );
         }
@@ -347,9 +375,9 @@ namespace Singular.ClassSpecific.DeathKnight
                     ret => !MovementManager.IsMovementDisabled 
                         && !Me.CurrentTarget.IsBoss() 
                         && Me.CurrentTarget.DistanceSqr > 10 * 10 
-                        && (Me.CurrentTarget.IsPlayer || Me.CurrentTarget.TaggedByMe)
+                        && (Me.CurrentTarget.IsPlayer || Me.CurrentTarget.TaggedByMe || (!Me.CurrentTarget.TaggedByOther && Dynamics.CompositeBuilder.CurrentBehaviorType == BehaviorType.Pull && SingularRoutine.CurrentWoWContext != WoWContext.Instances))
                     ),
-                new DecoratorContinue( ret => Me.IsMoving, new Action(ret => Navigator.PlayerMover.MoveStop())),
+                new DecoratorContinue( ret => Me.IsMoving, new Action(ret => StopMoving.Now())),
                 new WaitContinue( 1, until => Me.CurrentTarget.IsWithinMeleeRange, new ActionAlwaysSucceed())
                 );
         }
@@ -369,7 +397,7 @@ namespace Singular.ClassSpecific.DeathKnight
                     && (Me.HealthPercent < 80 || Me.HasAuraExpired("Dark Succor", 3) || (Me.GotTarget && Me.CurrentTarget.TimeToDeath() < 6) 
                     && Me.CurrentTarget.InLineOfSpellSight 
                     && Me.IsSafelyFacing( Me.CurrentTarget)
-                    && SpellManager.CanCast("Death Strike", Me.CurrentTarget)),
+                    && Spell.CanCastHack("Death Strike", Me.CurrentTarget)),
                 new Sequence(
                     new Action( r => Logger.WriteDebug( Color.White, "Dark Succor ({0} ms left) influenced Death Strike coming....", (int) Me.GetAuraTimeLeft("Dark Succor").TotalMilliseconds  )),
                     Spell.Cast("Death Strike")
@@ -385,7 +413,7 @@ namespace Singular.ClassSpecific.DeathKnight
                 // abilities that don't require Runes first
                     Spell.BuffSelf(
                         "Unholy Blight",
-                        ret => SpellManager.CanCast("Unholy Blight")
+                        ret => Spell.CanCastHack("Unholy Blight")
                             && Unit.NearbyUnfriendlyUnits.Any(u => (u.IsPlayer || u.IsBoss()) && u.Distance < (u.MeleeDistance() + 5) && u.HasAuraExpired("Blood Plague"))),
 
                     Spell.Cast("Outbreak", ret => Me.CurrentTarget.HasAuraExpired("Frost Fever") || Me.CurrentTarget.HasAuraExpired("Blood Plague")),
@@ -394,39 +422,12 @@ namespace Singular.ClassSpecific.DeathKnight
                     new Decorator(
                         ret => !Me.CurrentTarget.IsImmune(WoWSpellSchool.Frost) && Me.CurrentTarget.HasAuraExpired("Frost Fever"),
                         new PrioritySelector(
-                            Spell.Cast("Howling Blast", ret => Me.Specialization == WoWSpec.DeathKnightFrost),
-                            Spell.Cast("Icy Touch", ret => Me.Specialization != WoWSpec.DeathKnightFrost)
+                            Spell.Cast("Howling Blast", ret => Spell.UseAOE && Me.Specialization == WoWSpec.DeathKnightFrost),
+                            Spell.Cast("Icy Touch", ret => !Spell.UseAOE || Me.Specialization != WoWSpec.DeathKnightFrost)
                             )
                         ),
 
                     Spell.Cast("Plague Strike", ret => Me.CurrentTarget.HasAuraExpired("Blood Plague"))
-                    )
-                );
-        }
-
-        public static Composite CreateRaiseAllyBehavior(UnitSelectionDelegate onUnit)
-        {
-            if (!Settings.UseRaiseAlly)
-                return new PrioritySelector();
-
-            if (onUnit == null)
-            {
-                Logger.WriteDebug("CreateRaiseAllyBehavior: error - onUnit == null");
-                return new PrioritySelector();
-            }
-
-            return new PrioritySelector(
-                ctx => onUnit(ctx),
-                new Decorator(
-                    ret => onUnit(ret) != null && Spell.GetSpellCooldown("Raise Ally") == TimeSpan.Zero,
-                    new PrioritySelector(
-                        Spell.WaitForCast(true),
-                        Movement.CreateMoveToRangeAndStopBehavior(ret => (WoWUnit)ret, range => 40f),
-                        new Decorator(
-                            ret => !Spell.IsGlobalCooldown(),
-                            Spell.Cast("Raise Ally", ret => (WoWUnit)ret)
-                            )
-                        )
                     )
                 );
         }

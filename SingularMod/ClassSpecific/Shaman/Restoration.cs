@@ -29,41 +29,49 @@ namespace Singular.ClassSpecific.Shaman
         private static LocalPlayer Me { get { return StyxWoW.Me; } }
         private static ShamanSettings ShamanSettings { get { return SingularSettings.Instance.Shaman(); } }
 
-        #region BUFFS
-
-        [Behavior(BehaviorType.CombatBuffs | BehaviorType.PreCombatBuffs, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Normal )]
-        public static Composite CreateRestoShamanHealingBuffsNormal()
-        {
-            return new PrioritySelector(
-
-                Spell.BuffSelf("Water Shield", ret => Me.ManaPercent < 20),
-                Spell.BuffSelf("Earth Shield", ret => Me.ManaPercent > 35),
-
-                Common.CreateShamanImbueMainHandBehavior(Imbue.Earthliving, Imbue.Flametongue)
-                );
-        }
-
-        [Behavior(BehaviorType.CombatBuffs | BehaviorType.PreCombatBuffs, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Battlegrounds)]
-        public static Composite CreateRestoHealingBuffsBattlegrounds()
-        {
-            return new PrioritySelector(
-                Spell.BuffSelf("Earth Shield", ret => Me.ManaPercent > 25),
-                Spell.BuffSelf("Water Shield", ret => Me.ManaPercent < 15),
-
-                Common.CreateShamanImbueMainHandBehavior(Imbue.Earthliving, Imbue.Flametongue)
-                );
-        }
-
+        private static ulong guidLastHealTarget = 0;
         private static ulong guidLastEarthShield = 0;
 
-        [Behavior(BehaviorType.CombatBuffs | BehaviorType.PreCombatBuffs, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Instances )]
-        public static Composite CreateRestoHealingBuffsInstance()
-        {
-            return new Decorator(
-                ret => !Spell.IsGlobalCooldown() && !Spell.IsCastingOrChannelling(),
-                new PrioritySelector(
+        #region REST
 
-                    new Throttle( 2,
+        [Behavior(BehaviorType.Rest, WoWClass.Shaman, WoWSpec.ShamanRestoration)]
+        public static Composite CreateRestoShamanRest()
+        {
+            return new PrioritySelector(
+                new Decorator(
+                    ret => !StyxWoW.Me.HasAura("Drink") && !StyxWoW.Me.HasAura("Food"),
+                    CreateRestoShamanCombatBuffs()    // call here so any Earth Shield done before we drink
+                    ),
+                Singular.Helpers.Rest.CreateDefaultRestBehaviour("Healing Surge", "Ancestral Spirit"),
+                CreateRestoShamanHealingOnlyBehavior(selfOnly: false)
+                );
+        }
+
+        #endregion
+
+        #region BUFFS
+
+        /// <summary>
+        /// written as a single method to simplify reference by multi-context Rest behavior
+        /// </summary>
+        /// <returns></returns>
+        [Behavior(BehaviorType.CombatBuffs, WoWClass.Shaman, WoWSpec.ShamanRestoration)]
+        public static Composite CreateRestoShamanCombatBuffs()
+        {
+            if (SingularRoutine.CurrentWoWContext == WoWContext.Battlegrounds)
+            {
+                return new PrioritySelector(
+                    Spell.BuffSelf("Earth Shield", ret => Me.ManaPercent >= ShamanSettings.TwistDamageShield ),
+                    Spell.BuffSelf("Water Shield", ret => Me.ManaPercent <= ShamanSettings.TwistWaterShield ),
+
+                    Common.CreateShamanImbueMainHandBehavior(Imbue.Earthliving, Imbue.Flametongue)
+                    );
+            }
+
+            if (SingularRoutine.CurrentWoWContext == WoWContext.Instances)
+            {
+                return new PrioritySelector(
+                    new Throttle(10,
                         new PrioritySelector(
                             Spell.Buff("Earth Shield", on => GetBestEarthShieldTargetInstance()),
                             Spell.BuffSelf("Water Shield", ret => !Me.HasAura("Earth Shield"))
@@ -71,7 +79,16 @@ namespace Singular.ClassSpecific.Shaman
                         ),
 
                     Common.CreateShamanImbueMainHandBehavior(Imbue.Earthliving, Imbue.Flametongue)
-                    )
+                    );
+            }
+
+            // Normal
+            return new PrioritySelector(
+
+                Spell.BuffSelf("Earth Shield", ret => Me.ManaPercent >= ShamanSettings.TwistDamageShield),
+                Spell.BuffSelf("Water Shield", ret => Me.ManaPercent <= ShamanSettings.TwistWaterShield),
+
+                Common.CreateShamanImbueMainHandBehavior(Imbue.Earthliving, Imbue.Flametongue)
                 );
         }
 
@@ -83,14 +100,19 @@ namespace Singular.ClassSpecific.Shaman
         {
             WoWUnit target = null;
 
+            if ( HealerManager.Instance.TargetList.Any(m => m.HasMyAura("Earth Shield")))
+                return null;
+
             if (IsValidEarthShieldTarget(RaFHelper.Leader))
                 target = RaFHelper.Leader;
             else
             {
                 target = Group.Tanks.FirstOrDefault(t => IsValidEarthShieldTarget(t));
-                if (Me.Combat && target == null && !Unit.NearbyGroupMembers.Any(m => m.HasMyAura("Earth Shield")))
+                if (Me.Combat && target == null)
                 {
-                    target = HealerManager.Instance.HealList.Where(u => IsValidEarthShieldTarget(u.ToUnit())).OrderByDescending(u => HealerManager.Instance.HealList.Count(e => e.CurrentTargetGuid == u.Guid)).FirstOrDefault();
+                    target = HealerManager.Instance.TargetList.Where(u => u.Combat && IsValidEarthShieldTarget(u))
+                        .OrderByDescending(u => u.MaxHealth )
+                        .FirstOrDefault();
                 }
             }
 
@@ -138,131 +160,98 @@ namespace Singular.ClassSpecific.Shaman
 
         #endregion
 
-        #region NORMAL 
+        #region HEAL
 
-        [Behavior(BehaviorType.Rest, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Normal)]
-        public static Composite CreateRestoShamanRest()
+        [Behavior(BehaviorType.Heal, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Normal )]
+        public static Composite CreateRestoShamanHealBehaviorNormal()
+        {
+            // for Solo only, use DPS Heal logic
+            return Common.CreateShamanDpsHealBehavior();
+        }
+
+        #endregion
+
+        #region NORMAL
+
+        [Behavior(BehaviorType.Pull | BehaviorType.Combat, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Normal)]
+        public static Composite CreateRestoShamanCombatBehaviorSolo()
         {
             return new PrioritySelector(
+
+                Helpers.Common.EnsureReadyToAttackFromMediumRange(),
+
                 Spell.WaitForCastOrChannel(),
+
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown(),
                     new PrioritySelector(
-                        new Decorator(
-                            ret => !StyxWoW.Me.HasAura("Drink") && !StyxWoW.Me.HasAura("Food"),
-                            CreateRestoShamanHealingOnlyBehavior(true, false)
-                            ),
-                        Singular.Helpers.Rest.CreateDefaultRestBehaviour(null, "Ancestral Spirit"),
-                        CreateRestoShamanHealingOnlyBehavior(false, true)
+
+                        CreateRestoDiagnosticOutputBehavior( on => null ),
+
+                        Helpers.Common.CreateInterruptBehavior(),
+                        Dispelling.CreatePurgeEnemyBehavior("Purge"),
+
+                        Totems.CreateTotemsBehavior(),
+
+                        Spell.Cast("Elemental Blast"),
+                        Spell.Buff("Flame Shock", true, on => Me.CurrentTarget, req => true, 3),
+                        Spell.Cast("Lava Burst"),
+                        Spell.Cast("Earth Shock"),
+                        Spell.Cast("Chain Lightning", ret => Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 2 && !Unit.UnfriendlyUnitsNearTarget(12f).Any(u => u.IsCrowdControlled())),
+                        Spell.Cast("Lightning Bolt")
                         )
                     )
                 );
         }
 
-        [Behavior(BehaviorType.Pull, WoWClass.Shaman, WoWSpec.ShamanRestoration)]
-        public static Composite CreateRestoShamanPullBehavior()
-        {
-            return
-                new PrioritySelector(
-                    Helpers.Common.CreateDismount("Pulling"),
-                    Spell.WaitForCastOrChannel(),
-                    CreateRestoShamanHealingOnlyBehavior(false, true),
-                    new Decorator(
-                        ret => !Unit.NearbyFriendlyPlayers.Any(u => u.IsInMyPartyOrRaid),
+        #endregion
 
-                        new PrioritySelector(
-                            Safers.EnsureTarget(),
-                            Movement.CreateMoveToLosBehavior(),
-                            Movement.CreateFaceTargetBehavior(),
-                            Helpers.Common.CreateDismount("Pulling"),
+        #region BATTLEGROUNDS
 
-                            new Decorator(
-                                ret => Me.GotTarget && Me.CurrentTarget.Distance < 35,
-                                Movement.CreateEnsureMovementStoppedBehavior()
-                                ),
-
-                            Spell.WaitForCastOrChannel(),
-
-                            new Decorator(
-                                ret => !Spell.IsGlobalCooldown(),
-                                new PrioritySelector(
-
-                                    Totems.CreateTotemsBehavior(),
-
-                            // grinding or questing, if target meets these cast Flame Shock if possible
-                            // 1. mob is less than 12 yds, so no benefit from delay in Lightning Bolt missile arrival
-                            // 2. area has another player competing for mobs (we want to tag the mob quickly)
-                                    new Decorator(
-                                        ret => StyxWoW.Me.CurrentTarget.Distance < 12
-                                            || ObjectManager.GetObjectsOfType<WoWPlayer>(false, false).Any(p => p.Location.DistanceSqr(StyxWoW.Me.CurrentTarget.Location) <= 40 * 40),
-                                        new PrioritySelector(
-                                            Spell.Buff("Flame Shock", true),
-                                            Spell.Cast("Earth Shock", ret => !SpellManager.HasSpell("Flame Shock"))
-                                            )
-                                        ),
-
-                                    Spell.Cast("Lightning Bolt", mov => false, on => Me.CurrentTarget, ret => !StyxWoW.Me.IsMoving || Spell.HaveAllowMovingWhileCastingAura() || TalentManager.HasGlyph("Unleashed Lightning")),
-                                    Spell.Cast("Flame Shock"),
-                                    Spell.Cast("Unleash Weapon", ret => Common.IsImbuedForDPS(StyxWoW.Me.Inventory.Equipped.MainHand))
-                                    )
-                                ),
-
-                            Movement.CreateMoveToTargetBehavior(true, 35)
-                            )
-                        )
-                    );
-        }
-
-        [Behavior(BehaviorType.Heal, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Normal)]
-        public static Composite CreateRestoShamanHealBehaviorNormal()
-        {
-            return
-                new PrioritySelector(
-                    Spell.WaitForCastOrChannel(),
-                    CreateRestoShamanHealingOnlyBehavior(selfOnly: false, moveInRange: true));
-        }
-
-        [Behavior(BehaviorType.Combat, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Normal)]
-        public static Composite CreateRestoShamanCombatBehaviorNormal()
+        [Behavior(BehaviorType.Pull | BehaviorType.Combat, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Battlegrounds)]
+        public static Composite CreateRestoShamanCombatBehaviorBattlegrounds()
         {
             return new PrioritySelector(
-                Spell.WaitForCastOrChannel(),
-                CreateRestoShamanHealingOnlyBehavior(selfOnly: false, moveInRange: true),
-
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-
-                new Decorator(
-                    ret => Me.GotTarget && Me.CurrentTarget.Distance < 35,
-                    Movement.CreateEnsureMovementStoppedBehavior()
-                    ),
 
                 Spell.WaitForCastOrChannel(),
 
+                CreateRestoDiagnosticOutputBehavior(on => HealerManager.Instance.FirstUnit),
+
                 new Decorator(
-                    ret => !Spell.IsGlobalCooldown(),
+                    ret => !Spell.IsGlobalCooldown() && HealerManager.Instance.TargetList.Any( t => !t.IsMe && t.IsAlive ),
                     new PrioritySelector(
-
-                        Helpers.Common.CreateInterruptBehavior(),
-
-                        Totems.CreateTotemsBehavior(),
-
-                        Spell.Cast("Elemental Blast"),
-                        Spell.Buff("Flame Shock", true),
-
-                        Spell.Cast("Lava Burst"),
-                        Spell.Cast("Earth Shock",
-                            ret => StyxWoW.Me.HasAura("Lightning Shield", 5) &&
-                                    StyxWoW.Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds > 3),
-
-                        Spell.Cast("Chain Lightning", ret => Spell.UseAOE && Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 2 && !Unit.UnfriendlyUnitsNearTarget(10f).Any(u => u.IsCrowdControlled())),
-                        Spell.Cast("Lightning Bolt")
+                        HealerManager.CreateStayNearTankBehavior(),
+                        CreateRestoShamanHealingOnlyBehavior( selfOnly:false)
                         )
                     ),
 
-                Movement.CreateMoveToTargetBehavior(true, 35)
-                // Movement.CreateMoveToRangeAndStopBehavior(ret => Me.CurrentTarget, ret => NormalPullDistance)
+                new Decorator(
+                    ret => !Spell.IsGlobalCooldown() && !HealerManager.Instance.TargetList.Any( t => !t.IsMe && t.IsAlive ),
+                    new PrioritySelector(
+
+                        Helpers.Common.EnsureReadyToAttackFromMediumRange(),
+
+                        Spell.WaitForCastOrChannel(),
+
+                        new Decorator(
+                            ret => !Spell.IsGlobalCooldown(),
+                            new PrioritySelector(
+
+                                Helpers.Common.CreateInterruptBehavior(),
+                                Dispelling.CreatePurgeEnemyBehavior("Purge"),
+
+                                Totems.CreateTotemsBehavior(),
+
+                                Spell.Cast("Elemental Blast"),
+                                Spell.Buff("Flame Shock", true, on => Me.CurrentTarget, req => true, 3),
+                                Spell.Cast("Lava Burst"),
+                                Spell.Cast("Earth Shock"),
+                                Spell.Cast("Chain Lightning", ret => Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 2 && !Unit.UnfriendlyUnitsNearTarget(12f).Any(u => u.IsCrowdControlled())),
+                                Spell.Cast("Lightning Bolt")
+                                )
+                            )
+                        )
+                    )
                 );
         }
 
@@ -270,71 +259,107 @@ namespace Singular.ClassSpecific.Shaman
 
         #region INSTANCES
 
-        [Behavior(BehaviorType.Rest, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Instances)]
-        public static Composite CreateRestoShamanRestInstances()
+        [Behavior(BehaviorType.Pull | BehaviorType.Combat, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Instances )]
+        public static Composite CreateRestoShamanCombatBehaviorInstances()
         {
+#if OLD_APPROACH
             return new PrioritySelector(
+
+                ctx => HealerManager.Instance.TargetList.Any( t => !t.IsMe && t.IsAlive ),
+
+                Safers.EnsureTarget(),
+                Movement.CreateFaceTargetBehavior(),
+
                 Spell.WaitForCastOrChannel(),
+
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown(),
                     new PrioritySelector(
-                        CreateRestoHealingBuffsInstance(),
+
+                        CreateRestoDiagnosticOutputBehavior(on => Me.CurrentTarget),
+
                         new Decorator(
-                            ret => !StyxWoW.Me.HasAura("Drink") && !StyxWoW.Me.HasAura("Food"),
-                            CreateRestoShamanHealingOnlyBehavior(true, false)
+                            ret => (bool) ret,
+                            new PrioritySelector(
+                                HealerManager.CreateStayNearTankBehavior(),
+                                CreateRestoShamanHealingOnlyBehavior( selfOnly:false),
+                                Helpers.Common.CreateInterruptBehavior(),
+                                Dispelling.CreatePurgeEnemyBehavior("Purge"),
+                                Totems.CreateTotemsBehavior(),
+                                Spell.Cast("Lightning Bolt", ret => TalentManager.HasGlyph("Telluric Currents"))
+                                )
                             ),
-                        Singular.Helpers.Rest.CreateDefaultRestBehaviour(null, "Ancestral Spirit"),
-                        CreateRestoShamanHealingOnlyBehavior(false, true)
+
+                        new Decorator(
+                            ret => !((bool) ret),
+                            new PrioritySelector(
+                                CreateRestoDiagnosticOutputBehavior( on => HealerManager.Instance.FirstUnit),
+                                Spell.Cast("Elemental Blast"),
+                                Spell.Buff("Flame Shock", true, on => Me.CurrentTarget, req => true, 3),
+                                Spell.Cast("Lava Burst"),
+                                Spell.Cast("Earth Shock"),
+                                Spell.Cast("Chain Lightning", ret => Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 2 && !Unit.UnfriendlyUnitsNearTarget(12f).Any(u => u.IsCrowdControlled())),
+                                Spell.Cast("Lightning Bolt")
+                                )
+                            )
+
                         )
                     )
                 );
-        }
+#else
 
-        [Behavior(BehaviorType.Heal, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Instances)]
-        public static Composite CreateRestoShamanHealBehaviorInstance()
-        {
             return new PrioritySelector(
+
                 Spell.WaitForCastOrChannel(),
-                CreateRestoShamanHealingOnlyBehavior( selfOnly: false, moveInRange: true)
-                );
-        }
-
-        [Behavior(BehaviorType.Combat, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Instances )]
-        public static Composite CreateRestoShamanCombatBehaviorInstances()
-        {
-            return new PrioritySelector(
-                Spell.WaitForCastOrChannel(),
-
-                CreateRestoShamanHealingOnlyBehavior(selfOnly: false, moveInRange: true),
-
-                // no healing needed, then move within heal range of tank
-                Movement.CreateMoveToRangeAndStopBehavior(ret => BestTankToMoveNear, ret => 38f),
+                CreateRestoDiagnosticOutputBehavior(on => Me.CurrentTarget),
+                
+                HealerManager.CreateStayNearTankBehavior(),
 
                 new Decorator(
-                    ret => !Unit.NearbyFriendlyPlayers.Any(u => u.IsInMyPartyOrRaid) || TalentManager.HasGlyph("Telluric Currents"),
+                    ret => Unit.NearbyGroupMembers.Any(m => m.IsAlive && !m.IsMe),
                     new PrioritySelector(
-                        Safers.EnsureTarget(),
-                        Movement.CreateMoveToLosBehavior(),
+                        CreateRestoShamanHealingOnlyBehavior( selfOnly:false),
+                        Helpers.Common.CreateInterruptBehavior(),
+                        Dispelling.CreatePurgeEnemyBehavior("Purge"),
+                        Totems.CreateTotemsBehavior(),
+                        new Decorator( 
+                            req => TalentManager.HasGlyph("Telluric Currents"),
+                            new PrioritySelector(
+                                Safers.EnsureTarget(),
+                                Movement.CreateFaceTargetBehavior(),
+                                Helpers.Common.CreateInterruptBehavior(),
+                                Dispelling.CreatePurgeEnemyBehavior("Purge"),
+                                Spell.Cast("Lightning Bolt", 
+                                    mov => true,
+                                    on => Unit.NearbyUnitsInCombatWithUsOrOurStuff
+                                        .Where( u => u.IsAlive && u.SpellDistance() < 40 && Me.IsSafelyFacing(u))
+                                        .OrderByDescending( u => u.HealthPercent)
+                                        .FirstOrDefault( ),
+                                    req => !HealerManager.Instance.TargetList.Any( h => h.IsAlive && h.SpellDistance() < 40 && h.HealthPercent < ShamanSettings.Heal.TelluricHealthCast),
+                                    cancel => HealerManager.Instance.TargetList.Any( h => h.IsAlive && h.SpellDistance() < 40 && h.HealthPercent < ShamanSettings.Heal.TelluricHealthCancel)
+                                    )
+                                )
+                            )
+                        )
+                    ),
+
+                new Decorator(
+                    ret => Me.Combat && !Unit.NearbyGroupMembers.Any(m => m.IsAlive && !m.IsMe),
+                    new PrioritySelector(
+
+                        Helpers.Common.EnsureReadyToAttackFromMediumRange(),
                         Movement.CreateFaceTargetBehavior(),
-                        Spell.WaitForCast(),
+                        Spell.WaitForCastOrChannel(),
 
                         new Decorator(
-                            ret => !Spell.GcdActive,
+                            ret => !Spell.IsGlobalCooldown(),
                             new PrioritySelector(
                                 Helpers.Common.CreateInterruptBehavior(),
-                                Spell.Cast("Lightning Bolt"),
-
-                                Totems.CreateTotemsBehavior(),
-
                                 Spell.Cast("Elemental Blast"),
-                                Spell.Buff("Flame Shock", true),
-
+                                Spell.Buff("Flame Shock", true, on => Me.CurrentTarget, req => true, 3),
                                 Spell.Cast("Lava Burst"),
-                                Spell.Cast("Earth Shock",
-                                    ret => StyxWoW.Me.HasAura("Lightning Shield", 5) &&
-                                            StyxWoW.Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds > 3),
-
-                                Spell.Cast("Chain Lightning", ret => Spell.UseAOE && Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 2 && !Unit.UnfriendlyUnitsNearTarget(10f).Any(u => u.IsCrowdControlled())),
+                                Spell.Cast("Earth Shock"),
+                                Spell.Cast("Chain Lightning", ret => Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 2 && !Unit.UnfriendlyUnitsNearTarget(12f).Any(u => u.IsCrowdControlled())),
                                 Spell.Cast("Lightning Bolt")
                                 )
                             )
@@ -342,76 +367,24 @@ namespace Singular.ClassSpecific.Shaman
                     )
                 );
 
-        }
-
-        private static WoWUnit BestTankToMoveNear
-        {
-            get
-            {
-                if (!SingularSettings.Instance.StayNearTank)
-                    return null;
-
-                if (RaFHelper.Leader != null && RaFHelper.Leader.IsValid && RaFHelper.Leader.IsAlive && RaFHelper.Leader.Distance < 100)
-                    return RaFHelper.Leader;
-
-                return Group.Tanks.Where(t => t.IsAlive && t.Distance < SingularSettings.Instance.MaxHealTargetRange).OrderBy(t => t.Distance).FirstOrDefault();
-            }
+#endif
         }
 
         #endregion
 
-        #region BATTLEGROUNDS
+        private static WoWUnit _moveToHealUnit = null;
 
-        [Behavior(BehaviorType.Rest, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Battlegrounds )]
-        public static Composite CreateRestoShamanRestPvp()
-        {
-            return new PrioritySelector(
-                Spell.WaitForCastOrChannel(),
-                Spell.WaitForCast(),
-                new Decorator(
-                    ret => !Spell.IsGlobalCooldown(),
-                    new PrioritySelector(
-                        new Decorator(
-                            ret => !StyxWoW.Me.HasAura("Drink") && !StyxWoW.Me.HasAura("Food"),
-                            CreateRestoShamanHealingOnlyBehavior(true, false)
-                            ),
-                        Singular.Helpers.Rest.CreateDefaultRestBehaviour(null, "Ancestral Spirit"),
-                        CreateRestoShamanHealingOnlyBehavior(false, true)
-                        )
-                    )
-                );
-        }
-
-        [Behavior(BehaviorType.Combat, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Battlegrounds)]
-        public static Composite CreateRestoShamanCombatBehaviorPvp()
-        {
-            return new PrioritySelector(
-                Spell.WaitForCastOrChannel(),
-                CreateRestoShamanHealingOnlyBehavior(false, true)
-                );
-        }
-
-        [Behavior(BehaviorType.Heal, WoWClass.Shaman, WoWSpec.ShamanRestoration, WoWContext.Battlegrounds)]
-        public static Composite CreateRestoShamanHealBehaviorPvp()
-        {
-            return new PrioritySelector(
-                Spell.WaitForCastOrChannel(),
-                CreateRestoShamanHealingOnlyBehavior(false, true)
-                );
-        }
-
-        #endregion
-
-
-        // private static ulong guidLastHealTarget = 0;
-
-        public static Composite CreateRestoShamanHealingOnlyBehavior(bool selfOnly, bool moveInRange)
+        public static Composite CreateRestoShamanHealingOnlyBehavior(bool selfOnly = false)
         {
             HealerManager.NeedHealTargeting = true;
             PrioritizedBehaviorList behavs = new PrioritizedBehaviorList();
-            int cancelHeal = (int)Math.Max(SingularSettings.Instance.IgnoreHealTargetsAboveHealth, Math.Max(ShamanSettings.Heal.HealingWave, Math.Max(ShamanSettings.Heal.GreaterHealingWave, ShamanSettings.Heal.HealingSurge)));
+            int cancelHeal = (int)Math.Max( SingularSettings.Instance.IgnoreHealTargetsAboveHealth, Math.Max(ShamanSettings.Heal.HealingWave, Math.Max(ShamanSettings.Heal.GreaterHealingWave, ShamanSettings.Heal.HealingSurge)));
 
-            Logger.WriteFile( "Shaman Healing: will cancel cast of direct heal if health reaches {0:F1}%", cancelHeal);
+            bool moveInRange = false;
+            if ( !selfOnly)
+                moveInRange = (SingularRoutine.CurrentWoWContext == WoWContext.Battlegrounds);
+
+            Logger.WriteDebugInBehaviorCreate("Shaman Healing: will cancel cast of direct heal if health reaches {0:F1}%", cancelHeal);
 
 /*
             if (SpellManager.HasSpell("Earthliving Weapon"))
@@ -429,8 +402,8 @@ namespace Singular.ClassSpecific.Shaman
             if ( SingularRoutine.CurrentWoWContext == WoWContext.Instances )
                 behavs.AddBehavior( 9999, "Earth Shield", "Earth Shield", Spell.Buff("Earth Shield", on => GetBestEarthShieldTargetInstance()));
 
-            int dispelPriority = (SingularSettings.Instance.DispelDebuffs == DispelStyle.HighPriority) ? 999 : -999;
-            if ( SingularSettings.Instance.DispelDebuffs != DispelStyle.None)
+            int dispelPriority = (SingularSettings.Instance.DispelDebuffs == RelativePriority.HighPriority) ? 999 : -999;
+            if ( SingularSettings.Instance.DispelDebuffs != RelativePriority.None)
                 behavs.AddBehavior( dispelPriority, "Purify Spirit", null, Dispelling.CreateDispelBehavior());
 
             #region Save the Group
@@ -440,7 +413,7 @@ namespace Singular.ClassSpecific.Shaman
                     ret => StyxWoW.Me.GroupInfo.IsInParty || StyxWoW.Me.GroupInfo.IsInRaid,
                     Spell.Cast(
                         "Spirit Link Totem", ret => (WoWUnit)ret,
-                        ret => HealerManager.Instance.HealList.Count(
+                        ret => HealerManager.Instance.TargetList.Count(
                             p => p.GetPredictedHealthPercent() < ShamanSettings.Heal.SpiritLinkTotem && p.Distance <= Totems.GetTotemRange(WoWTotem.SpiritLink)) >= ShamanSettings.Heal.MinSpiritLinkCount
                         )
                     )
@@ -470,7 +443,8 @@ namespace Singular.ClassSpecific.Shaman
                     ret => StyxWoW.Me.GroupInfo.IsInParty || StyxWoW.Me.GroupInfo.IsInRaid,
                     Spell.Cast(
                         "Healing Tide Totem",
-                        ret => Me.Combat && HealerManager.Instance.HealList.Count(p => p.GetPredictedHealthPercent() < ShamanSettings.Heal.HealingTideTotem && p.Distance <= Totems.GetTotemRange(WoWTotem.HealingTide)) >= (Me.GroupInfo.IsInRaid ? 3 : 2)
+                        on => Me,
+                        req => Me.Combat && HealerManager.Instance.TargetList.Count(p => p.GetPredictedHealthPercent() < ShamanSettings.Heal.HealingTideTotem && p.Distance <= Totems.GetTotemRange(WoWTotem.HealingTide)) >= ShamanSettings.Heal.MinHealingTideCount
                         )
                     )
                 );
@@ -480,9 +454,7 @@ namespace Singular.ClassSpecific.Shaman
                     ret => StyxWoW.Me.GroupInfo.IsInParty || StyxWoW.Me.GroupInfo.IsInRaid,
                     Spell.Cast(
                         "Healing Stream Totem",
-                        ret => Me.Combat 
-                            && !Totems.Exist(WoWTotemType.Water)
-                            && HealerManager.Instance.HealList.Any(p => p.GetPredictedHealthPercent() < ShamanSettings.Heal.HealingStreamTotem && p.Distance <= Totems.GetTotemRange(WoWTotem.HealingTide))
+                        on => (!Me.Combat || Totems.Exist(WoWTotemType.Water)) ? null : HealerManager.Instance.TargetList.FirstOrDefault(p => p.GetPredictedHealthPercent() < ShamanSettings.Heal.HealingStreamTotem && p.Distance <= Totems.GetTotemRange(WoWTotem.HealingStream))
                         )
                     )
                 );
@@ -497,11 +469,11 @@ namespace Singular.ClassSpecific.Shaman
                             new PrioritySelector(
                                 new Sequence(
                                     new Action(r => Logger.WriteDebug("UE+HR - just before UE check")),
-                                    BuffUnleashLife(on => HealerManager.Instance.HealList.FirstOrDefault()),
+                                    BuffUnleashLife(on => HealerManager.Instance.TargetList.FirstOrDefault()),
                                     new Action(r => Logger.WriteDebug("UE+HR - past UE")),
                                     Helpers.Common.CreateWaitForLagDuration(ret => Spell.IsGlobalCooldown()),
                                     new Action(r => Logger.WriteDebug("UE+HR - past GCD start")),
-                                    new WaitContinue(TimeSpan.FromMilliseconds(1500), until => !Spell.IsGlobalCooldown(), new ActionAlwaysSucceed()),
+                                    new WaitContinue(TimeSpan.FromMilliseconds(1500), until => !Spell.IsGlobalCooldown(LagTolerance.No), new ActionAlwaysSucceed()),
                                     new Action(r => Logger.WriteDebug("UE+HR - past GCD stop")),
                                     Spell.CastOnGround("Healing Rain", on => (WoWUnit)on, req => true, false)
                                     ),
@@ -512,12 +484,20 @@ namespace Singular.ClassSpecific.Shaman
                                             Logger.WriteDebug("UE+HR - FAILED - Healing Target object became invalid");
                                         else if (((WoWUnit)ret).Distance > 40)
                                             Logger.WriteDebug("UE+HR - FAILED - Healing Target moved out of range");
-                                        else if (!SpellManager.CanCast("Healing Rain"))
-                                            Logger.WriteDebug("UE+HR - FAILED - SpellManager.CanCast() said NO to Healing Target");
-                                        else if (Styx.WoWInternals.World.GameWorld.IsInLineOfSpellSight(StyxWoW.Me.GetTraceLinePos(), ((WoWUnit) ret).Location))
-                                            Logger.WriteDebug("UE+HR - FAILED - SpellManager.CanCast() unit location not in Line of Sight");
+                                        else if (!Spell.CanCastHack("Healing Rain"))
+                                            Logger.WriteDebug("UE+HR - FAILED - Spell.CanCastHack() said NO to Healing Rain");
+                                        else if (Styx.WoWInternals.World.GameWorld.IsInLineOfSpellSight(StyxWoW.Me.GetTraceLinePos(), ((WoWUnit)ret).Location))
+                                            Logger.WriteDebug("UE+HR - FAILED - Spell.CanCastHack() unit location not in Line of Sight");
+                                        else if (Spell.IsSpellOnCooldown("Healing Rain"))
+                                            Logger.WriteDebug("UE+HR - FAILED - Healing Rain is on cooldown");
                                         else
-                                            Logger.WriteDebug("UE+HR - Something FAILED with Unleash Life + Healing Rain cast sequence");
+                                            Logger.WriteDebug("UE+HR - Something FAILED with Unleash Life + Healing Rain cast sequence (target={0}, h={1:F1}%, d={2:F1} yds, spellmax={3:F1} yds, cooldown={4})",
+                                                ((WoWUnit)ret).SafeName(), 
+                                                ((WoWUnit)ret).HealthPercent, 
+                                                ((WoWUnit)ret).Distance,
+                                                Spell.ActualMaxRange("Healing Rain", (WoWUnit) ret),
+                                                Spell.IsSpellOnCooldown("Healing Rain")
+                                                );
                                     }
                                     return RunStatus.Failure;
                                     })
@@ -572,7 +552,12 @@ namespace Singular.ClassSpecific.Shaman
                             mov => true,
                             on => (WoWUnit)on,
                             req => ((WoWUnit)req).GetPredictedHealthPercent() < ShamanSettings.Heal.HealingWave,
-                            cancel => ((WoWUnit)cancel).HealthPercent > cancelHeal),
+                            cancel => {
+                                if (((WoWUnit)cancel).HealthPercent > cancelHeal)
+                                    return true;
+
+                                return false;
+                                }),
                     new Action(r => TidalWaveConsume())
                     )
                 );
@@ -597,7 +582,7 @@ namespace Singular.ClassSpecific.Shaman
                     ret => StyxWoW.Me.GroupInfo.IsInParty || StyxWoW.Me.GroupInfo.IsInRaid,
                     Spell.BuffSelf(
                         "Ascendance",
-                        ret => HealerManager.Instance.HealList.Count(p => p.GetPredictedHealthPercent() < ShamanSettings.Heal.Ascendance) >= ShamanSettings.Heal.MinAscendanceCount 
+                        ret => HealerManager.Instance.TargetList.Count(p => p.GetPredictedHealthPercent() < ShamanSettings.Heal.Ascendance) >= ShamanSettings.Heal.MinAscendanceCount 
                         )
                     )
                 );
@@ -611,9 +596,9 @@ namespace Singular.ClassSpecific.Shaman
 
 
             return new PrioritySelector(
-                ctx => selfOnly ? StyxWoW.Me : HealerManager.Instance.FirstUnit,
+                ctx => selfOnly ? StyxWoW.Me : HealerManager.FindLowestHealthTarget(), // HealerManager.Instance.FirstUnit,
 
-                CreateRestoDiagnosticOutputBehavior(ret => (WoWUnit)ret),
+                CreateRestoDiagnosticOutputBehavior( ret => (WoWUnit)ret),
 
                 new Decorator(
                     ret => ret != null && (Me.Combat || ((WoWUnit)ret).Combat || ((WoWUnit)ret).GetPredictedHealthPercent() <= 99),
@@ -636,7 +621,7 @@ namespace Singular.ClassSpecific.Shaman
                                     Spell.Cast("Riptide", on =>
                                     {
                                         WoWUnit unit = GetBestRiptideTankTarget();
-                                        if (unit != null && Spell.CanCastHack("Riptide", unit))
+                                        if (unit != null && Spell.CanCastHack("Riptide", unit, skipWowCheck: true))
                                         {
                                             Logger.WriteDebug("Buffing RIPTIDE ON TANK: {0}", unit.SafeName());
                                             return unit;
@@ -654,8 +639,8 @@ namespace Singular.ClassSpecific.Shaman
                                 // cast Riptide if we need Tidal Waves -- skip if Ancestral Swiftness is 
                                 new Decorator(
                                     ret => {
-                                        int rollCount = HealerManager.Instance.HealList.Count(u => u.IsAlive && u.HasMyAura("Riptide"));
-                                        Logger.WriteDebug("GetBestRiptideTarget:  currently {0} group members have my Riptide", rollCount);
+                                        int rollCount = HealerManager.Instance.TargetList.Count(u => u.IsAlive && u.HasMyAura("Riptide"));
+                                        // Logger.WriteDebug("GetBestRiptideTarget:  currently {0} group members have my Riptide", rollCount);
                                         return rollCount < ShamanSettings.Heal.RollRiptideCount;
                                         },
                                     new Sequence(
@@ -674,7 +659,7 @@ namespace Singular.ClassSpecific.Shaman
                                         }),
                                         new Action(r => TidalWaveRefresh())
                                         )
-                                    )
+                                    ),
 
 
 
@@ -698,16 +683,22 @@ namespace Singular.ClassSpecific.Shaman
 
                                     Spell.Cast("Earth Shock"),
                                     Spell.Cast("Lightning Bolt"),
-                                    Movement.CreateMoveToTargetBehavior(true, 35f)
+                                    Movement.CreateMoveToUnitBehavior( on => StyxWoW.Me.CurrentTarget, 35f, 30f)
                                     )
                                 )
 #endif
-)
-                        ),
-
-                        new Decorator(
-                            ret => moveInRange,
-                            Movement.CreateMoveToRangeAndStopBehavior(ret => (WoWUnit)ret, ret => 38f))
+                                new Decorator(
+                                    ret => moveInRange,
+                                    new Sequence(
+                                        new Action( r => _moveToHealUnit = (WoWUnit) r ),
+                                        new PrioritySelector(
+                                            Movement.CreateMoveToLosBehavior( on => _moveToHealUnit ),
+                                            Movement.CreateMoveToUnitBehavior(on => _moveToHealUnit, 40f, 34f)
+                                            )
+                                        )
+                                    )
+                                )
+                            )
                         )
                     )
                 );
@@ -752,7 +743,7 @@ namespace Singular.ClassSpecific.Shaman
             get
             {
                 // TODO: Decide if we want to do this differently to ensure we take into account the T12 4pc bonus. (Not removing RT when using CH)
-                return HealerManager.Instance.HealList
+                return HealerManager.Instance.TargetList
                     .Where(u => u.IsAlive && u.DistanceSqr < 40*40 && u.GetPredictedHealthPercent() < ShamanSettings.Heal.ChainHeal)
                     .Select(u => (WoWUnit)u);
             }
@@ -763,7 +754,7 @@ namespace Singular.ClassSpecific.Shaman
             get
             {
                 // TODO: Decide if we want to do this differently to ensure we take into account the T12 4pc bonus. (Not removing RT when using CH)
-                return HealerManager.Instance.HealList
+                return HealerManager.Instance.TargetList
                     .Where(u => u.IsAlive && u.DistanceSqr < 40 * 40 && u.GetPredictedHealthPercent() < ShamanSettings.Heal.ChainHeal && u.HasMyAura("Riptide"))
                     .Select(u => (WoWUnit)u);
             }
@@ -849,7 +840,7 @@ namespace Singular.ClassSpecific.Shaman
             if (!Me.IsInGroup())
                 return null;
 
-            if (!Spell.CanCastHack("Chain Heal", Me))
+            if (!Spell.CanCastHack("Chain Heal", Me, skipWowCheck: true))
             {
                 Logger.WriteDebug("GetBestChainHealTarget: CanCastHack says NO to Chain Heal");
                 return null;
@@ -892,26 +883,36 @@ namespace Singular.ClassSpecific.Shaman
             if (!Me.IsInGroup() || !Me.Combat)
                 return null;
 
-            if (!Spell.CanCastHack("Healing Rain", Me))
+            if (!Spell.CanCastHack("Healing Rain", Me, skipWowCheck: true))
             {
-                Logger.WriteDebug("GetBestHealingRainTarget: CanCastHack says NO to Healing Rain");
+                // Logger.WriteDebug("GetBestHealingRainTarget: CanCastHack says NO to Healing Rain");
                 return null;
             }
 
+            // note: expensive, but worth it to optimize placement of Healing Rain by
+            // finding location with most heals, but if tied one with most living targets also
             // build temp list of targets that could use heal and are in range + radius
-            List<WoWUnit> coveredTargets = HealerManager.Instance.HealList
-                .Where(u => u.IsAlive && u.DistanceSqr < 50 * 50 && u.HealthPercent < ShamanSettings.Heal.HealingRain )
+            List<WoWUnit> coveredTargets = HealerManager.Instance.TargetList
+                .Where(u => u.IsAlive && u.DistanceSqr < 50 * 50)
+                .ToList();
+            List<WoWUnit> coveredRainTargets = coveredTargets
+                .Where(u => u.HealthPercent < ShamanSettings.Heal.HealingRain)
                 .ToList();
 
             // search all targets to find best one in best location to use as anchor for cast on ground
-            var t = Unit.NearbyGroupMembersAndPets
+            var t = coveredTargets
+                .Where( u => u.DistanceSqr < 40 * 40)
                 .Select(p => new {
                     Player = p,
-                    Count = coveredTargets
-                        .Where(pp => pp.IsAlive && pp.Location.DistanceSqr(p.Location) < 10 * 10)
+                    Count = coveredRainTargets
+                        .Where(pp => pp.Location.DistanceSqr(p.Location) < 10 * 10)
+                        .Count(),
+                    Covered = coveredTargets
+                        .Where(pp => pp.Location.DistanceSqr(p.Location) < 10 * 10)
                         .Count()
                     })
                 .OrderByDescending(v => v.Count)
+                .ThenByDescending(v => v.Covered)
                 .DefaultIfEmpty(null)
                 .FirstOrDefault();
 
@@ -952,7 +953,8 @@ namespace Singular.ClassSpecific.Shaman
                     ret => SingularSettings.Debug,
                     new Action(ret =>
                     {
-                        WoWUnit healtarget = onUnit(ret);
+                        WoWUnit healTarg = onUnit(ret);
+                        WoWUnit target = Me.CurrentTarget;
                         uint getaurastks = Me.GetAuraStacks("Tidal Waves");
                         uint actvstks = 0;
 
@@ -968,20 +970,18 @@ namespace Singular.ClassSpecific.Shaman
                         }
 
                         if (actvstks != getaurastks)
-                            Logger.WriteDebug(Color.MediumVioletRed, "Inconsistancy Error:  ActiveAuras[{0}] stacks != Me.GetAuraStacks('Tidal Waves') at [{1}] stacks", actvstks, getaurastks);
+                            Logger.WriteDebug(Color.Beige, "Inconsistancy Error:  Auras['Tidal Waves'] at {0} stacks != Me.GetAuraStacks('Tidal Waves') at {1} stacks", actvstks, getaurastks);
 
                         string shield;
-                        uint shstacks;
 
-                        shstacks = Me.GetAuraStacks("Earth Shield");
-                        if (shstacks > 0)
-                            shield = string.Format( "EARTH[{0}]", shstacks);
+                        if (Me.HasAura("Earth Shield"))
+                            shield = string.Format( "EARTH[{0}]", Me.GetAuraStacks("Earth Shield"));
                         else if ( Me.HasAura("Water Shield"))
                             shield = string.Format( "WATER[{0}]", (long) Me.GetAuraTimeLeft("Water Shield").TotalMinutes);
                         else if ( Me.HasAura("Lightning Shield"))
-                            shield = string.Format( "LHTNG[{0}]", (long) Me.GetAuraTimeLeft("Water Shield").TotalMinutes );
+                            shield = string.Format("LHTNG[{0}]", Me.GetAuraStacks("Lightning Shield"));
                         else 
-                            shield = "NONE";
+                            shield = "-none-";
 
                         string line = string.Format(".... h={0:F1}%/m={1:F1}%, combat={2}, twaves={3}, shield={4}",
                             Me.HealthPercent,
@@ -989,20 +989,36 @@ namespace Singular.ClassSpecific.Shaman
                             Me.Combat.ToYN(),
                             actvstks,
                             shield
-                            );                      
+                            );
 
-                        if (healtarget == null)
-                            line += ", target=(null)";
+                        if (healTarg == null)
+                            line += ", heal=(null)";
+                        else if (!healTarg.IsValid)
+                            line += ", heal=(invalid)";
                         else
-                            line += string.Format(", target={0} th={1:F1}% @ {2:F1} yds, combat={3}, tph={4:F1}%, tloss={5}, eshield={6}, riptide={7}",
-                                healtarget.SafeName(),
-                                healtarget.HealthPercent,
-                                healtarget.Distance,
-                                healtarget.Combat.ToYN(),
-                                healtarget.GetPredictedHealthPercent(true),
-                                healtarget.InLineOfSpellSight,
-                                (healtarget.GetAuraStacks("Earth Shield") > 0).ToYN(),
-                                (long) healtarget.GetAuraTimeLeft("Riptide").TotalMilliseconds
+                            line += string.Format(", heal={0} hh={1:F1}% @ {2:F1} yds, hcombat={3}, tph={4:F1}%, tloss={5}, eshield={6}, riptide={7}",
+                                healTarg.SafeName(),
+                                healTarg.HealthPercent,
+                                healTarg.Distance,
+                                healTarg.Combat.ToYN(),
+                                healTarg.GetPredictedHealthPercent(true),
+                                healTarg.InLineOfSpellSight,
+                                (healTarg.GetAuraStacks("Earth Shield") > 0).ToYN(),
+                                (long)healTarg.GetAuraTimeLeft("Riptide").TotalMilliseconds
+                                );
+
+                        if (target == null)
+                            line += ", target=(null)";
+                        else if (!target.IsValid)
+                            line += ", target=(invalid)";
+                        else
+                            line += string.Format(", target={0} th={1:F1}%, {2:F1} yds, face={3} tloss={4}, fs={5}",
+                                target.SafeName(),
+                                target.HealthPercent,
+                                target.Distance,
+                                Me.IsSafelyFacing(target),
+                                target.InLineOfSpellSight,
+                                (long)target.GetAuraTimeLeft("Flame Shock").TotalMilliseconds
                                 );
 
                         Logger.WriteDebug(Color.Yellow, line);

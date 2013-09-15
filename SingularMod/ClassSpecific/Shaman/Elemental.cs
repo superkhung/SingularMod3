@@ -32,11 +32,9 @@ namespace Singular.ClassSpecific.Shaman
         // private static int NormalPullDistance { get { return Math.Max( 35, CharacterSettings.Instance.PullDistance); } }
 
         [Behavior(BehaviorType.PreCombatBuffs | BehaviorType.CombatBuffs, WoWClass.Shaman, WoWSpec.ShamanElemental, WoWContext.Normal|WoWContext.Instances)]
-        public static Composite CreateShamanElementalPreCombatBuffsNormal()
+        public static Composite CreateElementalPreCombatBuffsNormal()
         {
             return new PrioritySelector(
-                Spell.WaitForCastOrChannel(),
-
                 Common.CreateShamanImbueMainHandBehavior(Imbue.Flametongue),
 
                 Common.CreateShamanDpsShieldBehavior(),
@@ -45,11 +43,9 @@ namespace Singular.ClassSpecific.Shaman
         }
 
         [Behavior(BehaviorType.PreCombatBuffs | BehaviorType.CombatBuffs, WoWClass.Shaman, WoWSpec.ShamanElemental, WoWContext.Battlegrounds )]
-        public static Composite CreateShamanElementalPreCombatBuffsPvp()
+        public static Composite CreateElementalPreCombatBuffsPvp()
         {
             return new PrioritySelector(
-                Spell.WaitForCastOrChannel(),
-
                 Common.CreateShamanImbueMainHandBehavior(Imbue.Flametongue),
 
                 Common.CreateShamanDpsShieldBehavior(),
@@ -58,7 +54,7 @@ namespace Singular.ClassSpecific.Shaman
         }
 
         [Behavior(BehaviorType.Rest, WoWClass.Shaman, WoWSpec.ShamanElemental)]
-        public static Composite CreateShamanElementalRest()
+        public static Composite CreateElementalRest()
         {
             return new PrioritySelector(
                 Spell.WaitForCast(),
@@ -86,13 +82,13 @@ namespace Singular.ClassSpecific.Shaman
 
 
         [Behavior(BehaviorType.Heal, WoWClass.Shaman, WoWSpec.ShamanElemental, WoWContext.Normal | WoWContext.Instances)]
-        public static Composite CreateShamanElementalHeal()
+        public static Composite CreateElementalHeal()
         {
             return Common.CreateShamanDpsHealBehavior( );
         }
 
         [Behavior(BehaviorType.Heal, WoWClass.Shaman, WoWSpec.ShamanElemental, WoWContext.Battlegrounds )]
-        public static Composite CreateShamanElementalPvPHeal()
+        public static Composite CreateElementalPvPHeal()
         {
             return Common.CreateShamanDpsHealBehavior( );
         }
@@ -102,14 +98,11 @@ namespace Singular.ClassSpecific.Shaman
         #region Normal Rotation
 
         [Behavior(BehaviorType.Pull, WoWClass.Shaman, WoWSpec.ShamanElemental, WoWContext.Normal)]
-        public static Composite CreateShamanElementalNormalPull()
+        public static Composite CreateElementalNormalPull()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
+
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
                 Spell.WaitForCastOrChannel(),
 
@@ -128,38 +121,36 @@ namespace Singular.ClassSpecific.Shaman
                             ret => StyxWoW.Me.CurrentTarget.Distance < 12
                                 || ObjectManager.GetObjectsOfType<WoWPlayer>(true, false).Any(p => p.Location.DistanceSqr(StyxWoW.Me.CurrentTarget.Location) <= 40 * 40),
                             new PrioritySelector(
-                                Spell.Buff("Flame Shock", true),
+                                Spell.Buff("Flame Shock", true, req => SpellManager.HasSpell("Lava Burst")),
                                 Spell.Cast("Unleash Weapon", ret => Common.IsImbuedForDPS(StyxWoW.Me.Inventory.Equipped.MainHand)),
                                 Spell.Cast("Earth Shock", ret => !SpellManager.HasSpell("Flame Shock"))
                                 )
                             ),
 
                         // have a big attack loaded up, so don't waste it
-                        Spell.Cast("Earth Shock",
-                            ret => StyxWoW.Me.HasAura("Lightning Shield", 5)),
+                        Spell.Cast("Earth Shock", ret => StyxWoW.Me.HasAura("Lightning Shield", 5)),
 
                         // otherwise, start with Lightning Bolt so we can follow with an instant
                         // to maximize damage at initial aggro
-                        Spell.Cast("Lightning Bolt", ret => !StyxWoW.Me.IsMoving || Spell.HaveAllowMovingWhileCastingAura() || TalentManager.HasGlyph("Unleashed Lightning")),
+                        Spell.Cast("Lightning Bolt"),
 
                         // we are moving so throw an instant of some type
-                        Spell.Cast("Flame Shock"),
+                        Spell.Buff("Flame Shock", true, req => SpellManager.HasSpell("Lava Burst")),
+                        Spell.Cast("Earth Shock"),
                         Spell.Cast("Unleash Weapon", ret => Common.IsImbuedForDPS(StyxWoW.Me.Inventory.Equipped.MainHand))
                         )
-                    ),
+                    )
 
-                Movement.CreateMoveToTargetBehavior(true, 38f)
+                // Movement.CreateMoveToUnitBehavior( on => StyxWoW.Me.CurrentTarget, 38f, 33f)
                 );
         }
 
         [Behavior(BehaviorType.Combat, WoWClass.Shaman, WoWSpec.ShamanElemental, WoWContext.Normal)]
-        public static Composite CreateShamanElementalNormalCombat()
+        public static Composite CreateElementalNormalCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
+
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
                 Spell.WaitForCastOrChannel(),
 
@@ -168,6 +159,7 @@ namespace Singular.ClassSpecific.Shaman
                     new PrioritySelector(
 
                         Helpers.Common.CreateInterruptBehavior(),
+                        Dispelling.CreatePurgeEnemyBehavior("Purge"),
 
                         new Decorator( 
                             ret => Common.GetImbue( StyxWoW.Me.Inventory.Equipped.MainHand) == Imbue.None,
@@ -197,12 +189,13 @@ namespace Singular.ClassSpecific.Shaman
                         Spell.Cast("Elemental Blast"),
                         Spell.Cast("Unleash Elements", ret => Common.HasTalent(ShamanTalents.UnleashedFury)),
 
-                        Spell.Buff("Flame Shock", true),
+                        Spell.Buff("Flame Shock", true, req => SpellManager.HasSpell("Lava Burst") || Me.CurrentTarget.TimeToDeath(-1) > 30),
 
                         Spell.Cast("Lava Burst"),
                         Spell.Cast("Earth Shock",
                             ret => StyxWoW.Me.HasAura("Lightning Shield", 5) &&
                                    StyxWoW.Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds > 3),
+                        Spell.Cast("Earth Shock", req => !SpellManager.HasSpell("Lava Burst")),
 
                         Spell.Cast("Unleash Elements", ret => 
                             StyxWoW.Me.IsMoving &&
@@ -212,9 +205,9 @@ namespace Singular.ClassSpecific.Shaman
                         Spell.Cast("Chain Lightning", ret => Spell.UseAOE && Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 2 && !Unit.UnfriendlyUnitsNearTarget(10f).Any(u => u.IsCrowdControlled())),
                         Spell.Cast("Lightning Bolt")
                         )
-                    ),
+                    )
 
-                Movement.CreateMoveToTargetBehavior(true, 38f)
+                // Movement.CreateMoveToUnitBehavior( on => StyxWoW.Me.CurrentTarget, 38f, 33f)
                 // Movement.CreateMoveToRangeAndStopBehavior(ret => Me.CurrentTarget, ret => NormalPullDistance)
                 );
         }
@@ -224,14 +217,10 @@ namespace Singular.ClassSpecific.Shaman
         #region Battleground Rotation
 
         [Behavior(BehaviorType.Pull | BehaviorType.Combat, WoWClass.Shaman, WoWSpec.ShamanElemental, WoWContext.Battlegrounds)]
-        public static Composite CreateShamanElementalPvPPullAndCombat()
+        public static Composite CreateElementalPvPPullAndCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
                 Spell.WaitForCastOrChannel(),
 
@@ -240,6 +229,7 @@ namespace Singular.ClassSpecific.Shaman
                     new PrioritySelector(
 
                         Helpers.Common.CreateInterruptBehavior(),
+                        Dispelling.CreatePurgeEnemyBehavior("Purge"),
 
                         new Decorator(
                             ret => Common.GetImbue(StyxWoW.Me.Inventory.Equipped.MainHand) == Imbue.None,
@@ -251,7 +241,7 @@ namespace Singular.ClassSpecific.Shaman
 
                         // Burst if 7 Stacks
                         new Decorator(
-                            ret => Me.HasAura("Lightning Shield", 7) && Spell.GetSpellCooldown("Earth Shock") == TimeSpan.Zero && Spell.GetSpellCooldown("Elemental Blast", 0) == TimeSpan.Zero,
+                            ret => Me.GotTarget && Me.CurrentTarget.SpellDistance() < 40 && Me.HasAura("Lightning Shield", 7) && Spell.GetSpellCooldown("Earth Shock") == TimeSpan.Zero,
                             new PrioritySelector(
                                 new Action( r => { Logger.Write( Color.White, "Burst Rotation"); return RunStatus.Failure;} ),
                                 Spell.Cast( "Unleash Elements", ret => Common.IsImbuedForDPS( Me.Inventory.Equipped.MainHand)),
@@ -293,9 +283,7 @@ namespace Singular.ClassSpecific.Shaman
                         Spell.BuffSelf("Searing Totem", ret => Me.GotTarget && Me.CurrentTarget.Distance < Totems.GetTotemRange(WoWTotem.Searing) && !Totems.Exist(WoWTotemType.Fire)),
                         Spell.Cast("Lightning Bolt")
                         )
-                    ),
-
-                Movement.CreateMoveToTargetBehavior(true, 38f)
+                    )
                 );
         }
 
@@ -303,16 +291,15 @@ namespace Singular.ClassSpecific.Shaman
 
         #region Instance Rotation
 
+        private static bool _doWeWantAcendance;
+
         [Behavior(BehaviorType.Pull | BehaviorType.Combat, WoWClass.Shaman, WoWSpec.ShamanElemental, WoWContext.Instances)]
-        public static Composite CreateShamanElementalInstancePullAndCombat()
+        public static Composite CreateElementalInstancePullAndCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
+                Movement.CreateEnsureMovementStoppedBehavior(33f),
 
                 Spell.WaitForCastOrChannel(),
 
@@ -320,6 +307,7 @@ namespace Singular.ClassSpecific.Shaman
                     ret => !Spell.IsGlobalCooldown(),
                     new PrioritySelector(
                         Helpers.Common.CreateInterruptBehavior(),
+                        Dispelling.CreatePurgeEnemyBehavior("Purge"),
 
                         Common.CreateShamanImbueMainHandBehavior(Imbue.Flametongue),
 
@@ -336,14 +324,20 @@ namespace Singular.ClassSpecific.Shaman
                                 )),
 
                         Spell.Cast("Elemental Blast"),
+
+                        Spell.Buff("Flame Shock", true, on => Me.CurrentTarget, req => true, 3),
+
                         Spell.Cast("Unleash Elements", ret => Common.HasTalent(ShamanTalents.UnleashedFury)),
 
-                        Spell.Buff("Flame Shock", true),
+                        new Sequence(
+                            Spell.Cast("Ascendance", req => Me.CurrentTarget.IsBoss() && Me.CurrentTarget.SpellDistance() < 40 && !Me.IsMoving ),
+                            new ActionAlwaysFail()  // Ascendance off the GCD, so fall through
+                            ),
 
                         Spell.Cast("Lava Burst"),
-                        Spell.Cast("Earth Shock", 
-                            ret => StyxWoW.Me.HasAura("Lightning Shield", 5) &&
-                                   StyxWoW.Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds > 3),
+                        Spell.Cast("Earth Shock",
+                            ret => Me.HasAura("Lightning Shield", 5)
+                                && Me.CurrentTarget.GetAuraTimeLeft("Flame Shock", true).TotalSeconds > 3),
                         Spell.Cast("Unleash Elements",
                             ret => StyxWoW.Me.IsMoving
                                 && !Spell.HaveAllowMovingWhileCastingAura()
@@ -351,9 +345,7 @@ namespace Singular.ClassSpecific.Shaman
                         Spell.Cast("Chain Lightning", ret => Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 2 && !Unit.UnfriendlyUnitsNearTarget(10f).Any(u => u.IsCrowdControlled())),
                         Spell.Cast("Lightning Bolt")
                         )
-                    ),
-
-                Movement.CreateMoveToTargetBehavior(true, 38f)
+                    )
                 );
         }
 
@@ -369,33 +361,49 @@ namespace Singular.ClassSpecific.Shaman
             return new ThrottlePasses(1, 1,
                 new Action(ret =>
                 {
-                    uint lstks = 0;
+                    uint stks = 0;
+                    string shield;
+
                     WoWAura aura = Me.GetAuraByName("Lightning Shield");
                     if (aura != null)
                     {
-                        lstks = aura.StackCount;
-                        if (!Me.HasAura("Lightning Shield", (int)lstks))
-                            Logger.WriteDebug(Color.MediumVioletRed, "Inconsistancy Error:  have {0} stacks but Me.HasAura('Lightning Shield', {0}) was False!!!!", lstks, lstks);
+                        stks = aura.StackCount;
+                        if (!Me.HasAura("Lightning Shield", (int)stks))
+                            Logger.WriteDebug(Color.MediumVioletRed, "Inconsistancy Error:  have {0} stacks but Me.HasAura('Lightning Shield', {0}) was False!!!!", stks, stks);
+                    }
+                    else
+                    {
+                        aura = Me.GetAuraByName("Water Shield");
+                        if (aura == null ) 
+                        {
+                            aura = Me.GetAuraByName("Earth Shield");
+                            if (aura != null)
+                                stks = aura.StackCount;
+                        }
                     }
 
-                    string line = string.Format(".... [{0}] h={1:F1}%/m={2:F1}%, lstks={3}",
+                    shield = aura == null ? "(null)" : aura.Name;
+                        
+                    string line = string.Format(".... [{0}] h={1:F1}%/m={2:F1}%, shield={3}, stks={4}, moving={5}",
                         CompositeBuilder.CurrentBehaviorType.ToString(),
                         Me.HealthPercent,
                         Me.ManaPercent,
-                        lstks
+                        shield,
+                        stks,
+                        Me.IsMoving.ToYN()
                         );
 
                     WoWUnit target = Me.CurrentTarget;
                     if (target == null)
                         line += ", target=(null)";
                     else
-                        line += string.Format(", target={0} @ {1:F1} yds, th={2:F1}%, face={3} tlos={4}, tloss={5}",
+                        line += string.Format(", target={0} @ {1:F1} yds, th={2:F1}%, face={3} loss={4}, fs={5}",
                             target.SafeName(),
                             target.Distance,
                             target.HealthPercent,
-                            Me.IsSafelyFacing(target),
-                            target.InLineOfSight,
-                            target.InLineOfSpellSight
+                            Me.IsSafelyFacing(target).ToYN(),
+                            target.InLineOfSpellSight.ToYN(),
+                            (long)target.GetAuraTimeLeft("Flame Shock").TotalMilliseconds
                             );
 
                     Logger.WriteDebug(Color.Yellow, line);

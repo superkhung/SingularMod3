@@ -15,14 +15,12 @@ namespace Singular.ClassSpecific.Paladin
         {
             return
                 new PrioritySelector(
-                    Safers.EnsureTarget(),
-                    Movement.CreateMoveToLosBehavior(),
-                    Movement.CreateFaceTargetBehavior(),
+                    Helpers.Common.EnsureReadyToAttackFromMelee(),
                     Helpers.Common.CreateAutoAttack(true),
                     Helpers.Common.CreateInterruptBehavior(),
                     Spell.Cast("Crusader Strike"),
                     Spell.Cast("Judgment"),
-                    Movement.CreateMoveToTargetBehavior(true, 5f)
+                    Movement.CreateMoveToMeleeBehavior(true)
                     );
         }
         [Behavior(BehaviorType.Pull, WoWClass.Paladin, 0)]
@@ -30,12 +28,10 @@ namespace Singular.ClassSpecific.Paladin
         {
             return
                 new PrioritySelector(
-                    Movement.CreateMoveToLosBehavior(),
-                    Movement.CreateFaceTargetBehavior(),
-                    Helpers.Common.CreateDismount("Pulling"),
+                    Helpers.Common.EnsureReadyToAttackFromMelee(),
                     Helpers.Common.CreateAutoAttack(true),
                     Spell.Cast("Judgment"),
-                    Movement.CreateMoveToTargetBehavior(true, 5f)
+                    Movement.CreateMoveToMeleeBehavior(true)
                     );
         }
         [Behavior(BehaviorType.Heal, WoWClass.Paladin, 0)]

@@ -20,7 +20,8 @@ namespace Singular.Settings
         Voidwalker  = 16,
         Succubus    = 17,
         Felhunter   = 15,
-        Felguard    = 29
+        Felguard    = 29,
+        Other       = 99999     // a quest or other pet forced upon us for some reason
     }
 
     public enum Soulstone
@@ -35,7 +36,7 @@ namespace Singular.Settings
     {
 
         public WarlockSettings()
-            : base(Path.Combine(SingularSettings.SettingsPath, "Warlock.xml"))
+            : base(Path.Combine(SingularSettings.SingularSettingsPath, "Warlock.xml"))
         {
         }
 
@@ -68,9 +69,16 @@ namespace Singular.Settings
         public int HealthFunnelRest { get; set; }
 
         [Setting]
-        [DefaultValue(60)]
+        [DefaultValue(false)]
+        [Category("Pet")]
+        [DisplayName("Use Disarm")]
+        [Description("True: use Disarm on cooldown; False: do not cast")]
+        public bool UseDisarm { get; set; }
+
+        [Setting]
+        [DefaultValue(20)]
         [Category("Common")]
-        [DisplayName("Health Funnel %")]
+        [DisplayName("Drain Life%")]
         [Description("Health % which we should Drain Life")]
         public int DrainLifePercentage { get; set; }
 
@@ -82,10 +90,17 @@ namespace Singular.Settings
         public bool UseFear { get; set; }
 
         [Setting]
+        [DefaultValue(3)]
+        [Category("Common")]
+        [DisplayName("Use Fear Count")]
+        [Description("Use Fear when this many attacking Warlock (not pet); 0 to disable mob count based check")]
+        public int UseFearCount { get; set; }
+
+        [Setting]
         [DefaultValue(Soulstone.Auto)]
         [Category("Common")]
         [DisplayName("Use Soulstone")]
-        [Description("Controls usage -- Auto: Instances=Ressurect, Normal/Battleground=Self, Disabled Movement=None")]
+        [Description("Auto: Instances=Ressurect, Normal/Battleground=Self, Disabled Movement=None -- Ressurrect requires Singular Combat Rez settings to be set as well")]
         public Soulstone UseSoulstone { get; set; }
 
         [Setting]
@@ -108,6 +123,19 @@ namespace Singular.Settings
         [DisplayName("Use Demonic Leap")]
         [Description("Demonic Leap to disengage from melee")]
         public bool UseDemonicLeap { get; set; }
+
+        public enum SpellPriority
+        {
+            Noxxic = 1,
+            IcyVeins = 2
+        }
+
+        [Setting]
+        [DefaultValue(SpellPriority.Noxxic )]
+        [Category("Destruction")]
+        [DisplayName("Spell Priority Selection")]
+        public SpellPriority DestructionSpellPriority { get; set; }
+
 
 
 #region Setting Helpers

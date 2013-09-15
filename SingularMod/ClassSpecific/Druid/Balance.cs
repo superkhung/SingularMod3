@@ -18,6 +18,7 @@ using System.Drawing;
 using System.Collections.Generic;
 using CommonBehaviors.Actions;
 using Styx.Pathing;
+using Styx.Common.Helpers;
 
 namespace Singular.ClassSpecific.Druid
 {
@@ -74,6 +75,8 @@ namespace Singular.ClassSpecific.Druid
                 ret => !Spell.IsGlobalCooldown() && !Spell.IsCastingOrChannelling(),
                 new PrioritySelector(
 
+                    CreateBalanceDiagnosticOutputBehavior(),
+
             #region Avoidance 
 
                     Spell.Cast("Typhoon",
@@ -85,28 +88,32 @@ namespace Singular.ClassSpecific.Druid
                             && Me.IsSafelyFacing(Me.CurrentTarget, 90f)),
 
                     new Decorator(
-                        ret => Unit.NearbyUnitsInCombatWithMe.Any(u => u.SpellDistance() < 8)
+                        ret => Unit.NearbyUnitsInCombatWithMeOrMyStuff.Any(u => u.SpellDistance() < 8)
                             && (SingularRoutine.CurrentWoWContext == WoWContext.Battlegrounds || (SingularRoutine.CurrentWoWContext == WoWContext.Normal && Me.HealthPercent < 50)),
                         CreateDruidAvoidanceBehavior(CreateSlowMeleeBehavior(), null, null)
                         ),
 
             #endregion 
 
-                    Spell.Cast("Rejuvenation", mov => false, on => Me, ret => _ImaMoonBeast && Me.HasAuraExpired("Rejuvenation", 1)),
+                    Spell.Cast("Rejuvenation", on => Me, 
+                        req => {
+                            int setting = _ImaMoonBeast ? DruidSettings.MoonBeastRejuvenationHealth : DruidSettings.SelfRejuvenationHealth;
+                            return Me.HealthPercent <= setting && Me.HasAuraExpired("Rejuvenation", 1);
+                        }),
 
-                    Common.CreateNaturesSwiftnessHeal(ret => Me.HealthPercent < 60),
-                    Spell.Cast("Renewal", ret => Me.HealthPercent < DruidSettings.RenewalHealth),
-                    Spell.BuffSelf("Cenarion Ward", ret => Me.HealthPercent < 85 || Unit.NearbyUnfriendlyUnits.Count(u => u.Aggro || (u.Combat && u.IsTargetingMeOrPet)) > 1),
+                    Common.CreateNaturesSwiftnessHeal(ret => Me.HealthPercent < DruidSettings.SelfNaturesSwiftnessHealth ),
+                    Spell.BuffSelf("Renewal", ret => Me.HealthPercent < DruidSettings.SelfRenewalHealth),
+                    Spell.BuffSelf("Cenarion Ward", ret => Me.HealthPercent < DruidSettings.SelfCenarionWardHealth),
 
                     new Decorator(
-                        ret => Me.HealthPercent < 40 || (_CrowdControlTarget != null && _CrowdControlTarget.IsValid && (_CrowdControlTarget.IsCrowdControlled() || Spell.DoubleCastPreventionDict.ContainsAny( _CrowdControlTarget, "Disorienting Roar", "Mighty Bash", "Cyclone", "Hibernate"))),
+                        ret => Me.HealthPercent < DruidSettings.SelfHealingTouchHealth || (_CrowdControlTarget != null && _CrowdControlTarget.IsValid && (_CrowdControlTarget.IsCrowdControlled() || Spell.DoubleCastPreventionDict.ContainsAny( _CrowdControlTarget, "Disorienting Roar", "Mighty Bash", "Cyclone", "Hibernate"))),
                         new PrioritySelector(
 
                             Spell.Buff("Disorienting Roar", req => !Me.CurrentTarget.Stunned && !Me.CurrentTarget.IsCrowdControlled()),
                             Spell.Buff("Mighty Bash", req => !Me.CurrentTarget.Stunned && !Me.CurrentTarget.IsCrowdControlled()),
 
                             new Decorator(
-                                ret => 1 == Unit.NearbyUnitsInCombatWithMe.Count(),
+                                ret => 1 == Unit.NearbyUnitsInCombatWithMeOrMyStuff.Count(),
                                 new PrioritySelector(
                                     new Action(r =>
                                     {
@@ -131,7 +138,7 @@ namespace Singular.ClassSpecific.Druid
                             new Throttle(Spell.BuffSelf("Barkskin")),
 
                             new Decorator(
-                                req => !Group.AnyHealerNearby && (Me.CurrentTarget.TimeToDeath() > 15 || Unit.NearbyUnitsInCombatWithMe.Count() > 1),
+                                req => !Group.AnyHealerNearby && (Me.CurrentTarget.TimeToDeath() > 15 || Unit.NearbyUnitsInCombatWithMeOrMyStuff.Count() > 1),
                                 new PrioritySelector(
                                     Spell.BuffSelf("Nature's Vigil"),
                                     Spell.BuffSelf("Heart of the Wild")
@@ -143,7 +150,9 @@ namespace Singular.ClassSpecific.Druid
                                 Spell.Cast("Healing Touch", mov => true, on => Me, req => Me.GetPredictedHealthPercent(true) < 90, req => Me.HealthPercent > 95)
                                 )
                             )
-                        )
+                        ),
+
+                    Spell.Cast("Healing Touch", on => Me, req => _ImaMoonBeast && Me.HealthPercent <= DruidSettings.MoonBeastHealingTouch && Me.HasAuraExpired("Rejuvenation", 1))
                     )
                 );
         }
@@ -156,11 +165,7 @@ namespace Singular.ClassSpecific.Druid
         public static Composite CreateBalancePullNormal()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
                 Spell.WaitForCastOrChannel(),
 
@@ -191,36 +196,27 @@ namespace Singular.ClassSpecific.Druid
                         )
                     ),
 
-                Movement.CreateMoveToTargetBehavior(true, 38f)
+                Movement.CreateMoveToUnitBehavior( on => StyxWoW.Me.CurrentTarget, 38f, 33f)
+                // Movement.CreateMoveToUnitBehavior( on => StyxWoW.Me.CurrentTarget, 38f, 33f)
                 );
         }
 
         [Behavior(BehaviorType.Combat, WoWClass.Druid, WoWSpec.DruidBalance, WoWContext.Normal)]
         public static Composite CreateDruidBalanceNormalCombat()
         {
-            Kite.CreateKitingBehavior(CreateSlowMeleeBehavior(), null, null);
-
             Common.WantedDruidForm = ShapeshiftForm.Moonkin;
             return new PrioritySelector(
 
-                Safers.EnsureTarget(),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
-                Helpers.Common.CreateAutoAttack(false),
-                Movement.CreateEnsureMovementStoppedBehavior( 35f),
-
-                Spell.WaitForCast(true),
+                Spell.WaitForCast(FaceDuring.Yes),
 
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown(),
                     new PrioritySelector(
 
-                        CreateBalanceDiagnosticOutputBehavior(),
-
                         new Decorator( 
-                            ret => Me.HealthPercent < 40 && Unit.NearbyUnitsInCombatWithMe.Any( u => u.IsWithinMeleeRange),
+                            ret => Me.HealthPercent < 40 && Unit.NearbyUnitsInCombatWithMeOrMyStuff.Any( u => u.IsWithinMeleeRange),
                             CreateDruidAvoidanceBehavior( CreateSlowMeleeBehavior(), null, null)
                             ),
 
@@ -240,29 +236,22 @@ namespace Singular.ClassSpecific.Druid
                             ret => Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 3,
                             new PrioritySelector(
 
-                                Spell.Cast("Wild Mushroom: Detonate", ret => MushroomCount >= 3),
+                                CreateMushroomSetAndDetonateBehavior(),
 
-                                // If Detonate is coming off CD, make sure we drop some more shrooms. 3 seconds is probably a little late, but good enough.
                                 new Sequence(
-                                    Spell.CastOnGround("Wild Mushroom",
-                                        ret => BestAoeTarget.Location,
-                                        ret => BestAoeTarget != null && Spell.GetSpellCooldown("Wild Mushroom: Detonate").TotalSeconds <= 4),
-                                    new Action(ctx => Lua.DoString("SpellStopTargeting()"))
+                                    Spell.CastOnGround("Force of Nature",
+                                        ret => StyxWoW.Me.CurrentTarget.Location,
+                                        ret => true),
+                                    new ActionAlwaysFail()
                                     ),
-
-                                Spell.CastOnGround("Force of Nature",
-                                    ret => StyxWoW.Me.CurrentTarget.Location,
-                                    ret => true),
 
                                 Spell.Cast("Starfall"),
 
-                                Spell.Cast("Moonfire",
-                                    ret => Unit.NearbyUnfriendlyUnits.FirstOrDefault(u =>
-                                                u.Combat && !u.IsCrowdControlled() && u.HasAuraExpired("Moonfire", 2))),
-
-                                Spell.Cast("Sunfire",
-                                    ret => Unit.NearbyUnfriendlyUnits.FirstOrDefault(u =>
-                                                u.Combat && !u.IsCrowdControlled() && !u.HasAuraExpired("Sunfire", 2)))
+                                new PrioritySelector(
+                                    ctx => Unit.NearbyUnfriendlyUnits.Where(u => u.Combat && !u.IsCrowdControlled() && Me.IsSafelyFacing(u)).ToList(),
+                                    Spell.Cast("Moonfire", ret => ((List<WoWUnit>)ret).FirstOrDefault(u => u.HasAuraExpired("Moonfire", 2))),
+                                    Spell.Cast("Sunfire", ret => ((List<WoWUnit>)ret).FirstOrDefault(u => u.HasAuraExpired("Sunfire", 2)))
+                                    )
                                 )
                             ),
 
@@ -287,16 +276,13 @@ namespace Singular.ClassSpecific.Druid
                         Spell.Cast("Starsurge"),
                         Spell.Cast("Starfall", ret => Me.CurrentTarget.IsPlayer || (Me.CurrentTarget.Elite && (Me.CurrentTarget.Level + 10) >= Me.Level)),
 
-                        Spell.Cast("Wrath",
-                            ret => GetEclipseDirection() == EclipseType.Lunar ),
-
-                        Spell.Cast("Starfire",
-                            ret => GetEclipseDirection() == EclipseType.Solar )
-
+                        new PrioritySelector(
+                            ctx => GetEclipseDirection() == EclipseType.Lunar,
+                            Spell.Cast("Starfire", ret => !(bool) ret ),
+                            Spell.Cast("Wrath", ret => (bool) ret)
+                            )
                         )
-                    ),
-
-                Movement.CreateMoveToTargetBehavior(true, 35f)
+                    )
                 );
         }
 
@@ -307,29 +293,21 @@ namespace Singular.ClassSpecific.Druid
         [Behavior(BehaviorType.Combat, WoWClass.Druid, WoWSpec.DruidBalance, WoWContext.Battlegrounds)]
         public static Composite CreateDruidBalancePvPCombat()
         {
-            Kite.CreateKitingBehavior(CreateSlowMeleeBehavior(), null, null);
-
             Common.WantedDruidForm = ShapeshiftForm.Moonkin;
 
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
-                Movement.CreateEnsureMovementStoppedBehavior(30f),  // cause forced stop a little closer in PVP
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
                 // Ensure we do /petattack if we have treants up.
                 Helpers.Common.CreateAutoAttack(true),
 
-                Spell.WaitForCast(true),
+                Spell.WaitForCast(FaceDuring.Yes),
 
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown(), 
                     new PrioritySelector(
 
-                        CreateBalanceDiagnosticOutputBehavior(),
-
-                        Spell.BuffSelf("Moonkin Form"),
+                        Spell.BuffSelf("Moonkin Form", req => !Utilities.EventHandlers.IsShapeshiftSuppressed),
 
                         new PrioritySelector(
                             ctx => Unit.NearbyUnfriendlyUnits.FirstOrDefault( u => u.IsCasting && u.Distance <30 && u.CurrentTargetGuid == Me.Guid ),
@@ -375,8 +353,9 @@ namespace Singular.ClassSpecific.Druid
                         new Decorator(
                             ret => !Unit.NearbyUnfriendlyUnits.Any(u => u.CurrentTargetGuid == Me.Guid),
                             new PrioritySelector(
-                                Spell.Cast("Wrath", ret => GetEclipseDirection() == EclipseType.Lunar),
-                                Spell.Cast("Starfire", ret => GetEclipseDirection() == EclipseType.Solar)
+                                ctx => GetEclipseDirection() == EclipseType.Lunar,
+                                Spell.Cast("Starfire", ret => !(bool) ret ),
+                                Spell.Cast("Wrath", ret => (bool) ret)
                                 )
                             ),
 #if SPAM_INSTANT_TO_AVOID_SPELLLOCK
@@ -399,9 +378,7 @@ namespace Singular.ClassSpecific.Druid
                             on => Unit.NearbyUnfriendlyUnits.FirstOrDefault( u => u.Distance < 35 && !u.HasAura( "Weakened Armor") && Me.IsSafelyFacing(u) && u.InLineOfSpellSight ))
 
                         )
-                    ),
-
-                Movement.CreateMoveToTargetBehavior(true, 35f)
+                    )
                 );
         }
 
@@ -416,20 +393,13 @@ namespace Singular.ClassSpecific.Druid
             Common.WantedDruidForm = ShapeshiftForm.Moonkin;
             return new PrioritySelector(
 
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
-                Helpers.Common.CreateAutoAttack(false),
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
-                Spell.WaitForCast(true),
+                Spell.WaitForCast(FaceDuring.Yes),
 
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown(),
                     new PrioritySelector(
-
-                        CreateBalanceDiagnosticOutputBehavior(),
 
                         Spell.Buff("Innervate",
                             ret => (from healer in Group.Healers 
@@ -439,7 +409,7 @@ namespace Singular.ClassSpecific.Druid
                         Spell.BuffSelf("Innervate",
                             ret => StyxWoW.Me.ManaPercent <= DruidSettings.InnervateMana),
 
-                        Spell.BuffSelf("Moonkin Form"),
+                        Spell.BuffSelf("Moonkin Form", req => !Utilities.EventHandlers.IsShapeshiftSuppressed),
 
                         Spell.Cast("Mighty Bash", ret => Me.CurrentTarget.IsWithinMeleeRange),
 
@@ -447,29 +417,22 @@ namespace Singular.ClassSpecific.Druid
                             ret => Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 3,
                             new PrioritySelector(
 
-                                Spell.Cast("Wild Mushroom: Detonate", ret => MushroomCount >= 3),
+                                CreateMushroomSetAndDetonateBehavior(),
 
-                                // If Detonate is coming off CD, make sure we drop some more shrooms. 3 seconds is probably a little late, but good enough.
                                 new Sequence(
-                                    Spell.CastOnGround("Wild Mushroom",
-                                        ret => BestAoeTarget.Location,
-                                        ret => Spell.GetSpellCooldown("Wild Mushroom: Detonate").TotalSeconds <= 2 && BestAoeTarget != null && MushroomCount < 3 ),
-                                    new Action(ctx => Lua.DoString("SpellStopTargeting()"))
+                                    Spell.CastOnGround("Force of Nature",
+                                        ret => StyxWoW.Me.CurrentTarget.Location,
+                                        ret => true ),
+                                    new ActionAlwaysFail()
                                     ),
-
-                                Spell.CastOnGround("Force of Nature",
-                                    ret => StyxWoW.Me.CurrentTarget.Location,
-                                    ret => true ),
 
                                 Spell.Cast("Starfall", ret => StyxWoW.Me),
 
-                                Spell.Cast("Moonfire",
-                                    ret => Unit.NearbyUnfriendlyUnits.FirstOrDefault(u =>
-                                                u.Combat && !u.IsCrowdControlled() && !u.HasMyAura("Moonfire"))),
-
-                                Spell.Cast("Sunfire",
-                                    ret => Unit.NearbyUnfriendlyUnits.FirstOrDefault(u =>
-                                                u.Combat && !u.IsCrowdControlled() && !u.HasMyAura("Sunfire")))
+                                new PrioritySelector(
+                                    ctx => Unit.NearbyUnfriendlyUnits.Where(u => u.Combat && !u.IsCrowdControlled() && Me.IsSafelyFacing(u)).ToList(),
+                                    Spell.Cast("Moonfire", ret => ((List<WoWUnit>)ret).FirstOrDefault(u => u.HasAuraExpired("Moonfire", 2))),
+                                    Spell.Cast("Sunfire", ret => ((List<WoWUnit>)ret).FirstOrDefault(u => u.HasAuraExpired("Sunfire", 2)))
+                                    )
                                 )
                             ),
 
@@ -490,8 +453,8 @@ namespace Singular.ClassSpecific.Druid
                             ret => Me.HasAura("Celestial Alignment"),
                             new PrioritySelector(
                                 // to do: make last two casts DoTs if possible... 
-                                Spell.Cast("Starsurge", ret => SpellManager.HasSpell("Starsurge")),
-                                Spell.Cast("Starfire", ret => SpellManager.HasSpell("Starfire"))
+                                Spell.Cast("Starsurge"),
+                                Spell.Cast("Starfire")
                                 )
                             ),
 
@@ -500,16 +463,13 @@ namespace Singular.ClassSpecific.Druid
                         Spell.Cast("Starsurge"),
                         Spell.Cast("Starfall"),
 
-                        Spell.Cast("Wrath",
-                            ret => GetEclipseDirection() == EclipseType.Lunar ),
-
-                        Spell.Cast("Starfire",
-                            ret => GetEclipseDirection() == EclipseType.Solar )
-
+                        new PrioritySelector(
+                            ctx => GetEclipseDirection() == EclipseType.Lunar,
+                            Spell.Cast("Starfire", ret => !(bool) ret ),
+                            Spell.Cast("Wrath", ret => (bool) ret)
+                            )
                         )
-                    ),
-
-                Movement.CreateMoveToTargetBehavior(true, 35f)
+                    )
                 );
         }
 
@@ -584,51 +544,6 @@ namespace Singular.ClassSpecific.Druid
         #endregion
 
 
-        #region Diagnostics
-
-        private static Composite CreateBalanceDiagnosticOutputBehavior()
-        {
-            return new Decorator(
-                ret => SingularSettings.Debug,
-                new Throttle(1,
-                    new Action(ret =>
-                    {
-                        string log;
-                        WoWAura eclips = Me.GetAllAuras().FirstOrDefault(a => a.Name == "Eclipse (Solar)" || a.Name == "Eclipse (Lunar)");
-                        string eclipsString = eclips == null ? "None" : (eclips.Name == "Eclipse (Solar)" ? "Solar" : "Lunar");
-
-                        log = string.Format(".... h={0:F1}%/m={1:F1}%, form:{2}, eclps={3}, towards={4}, eclps#={5}, mushcnt={6}",
-                            Me.HealthPercent,
-                            Me.ManaPercent,
-                            Me.Shapeshift.ToString(),
-                            eclipsString,
-                            GetEclipseDirection().ToString(),
-                            Me.CurrentEclipse,
-                            MushroomCount
-                            );
-
-                        WoWUnit target = Me.CurrentTarget;
-                        if (target != null)
-                        {
-                            log += string.Format(", th={0:F1}%/tm={1:F1}%, dist={2:F1}, face={3}, loss={4}, sfire={5}, mfire={6}",
-                                target.HealthPercent,
-                                target.ManaPercent,
-                                target.Distance,
-                                Me.IsSafelyFacing(target),
-                                target.InLineOfSpellSight,
-                                (long)target.GetAuraTimeLeft("Sunfire", true).TotalMilliseconds,
-                                (long)target.GetAuraTimeLeft("Moonfire", true).TotalMilliseconds
-                                );
-                        }
-
-                        Logger.WriteDebug(Color.AntiqueWhite, log);
-                    })
-                    )
-                );
-        }
-
-        #endregion
-
         [Behavior(BehaviorType.PreCombatBuffs, WoWClass.Druid, WoWSpec.DruidBalance, WoWContext.Battlegrounds | WoWContext.Instances, 2)]
         public static Composite CreateBalancePreCombatBuffBattlegrounds()
         {
@@ -648,7 +563,8 @@ namespace Singular.ClassSpecific.Druid
         public static Composite CreateBalancePullBuff()
         {
             return new PrioritySelector(
-                Spell.BuffSelf("Moonkin Form")
+                CreateBalanceDiagnosticOutputBehavior(),
+                Spell.BuffSelf("Moonkin Form", req => !Utilities.EventHandlers.IsShapeshiftSuppressed)
                 );
         }
 
@@ -656,7 +572,7 @@ namespace Singular.ClassSpecific.Druid
         public static Composite CreateBalanceCombatBuffNormal()
         {
             return new PrioritySelector(
-                Spell.BuffSelf("Moonkin Form")
+                Spell.BuffSelf("Moonkin Form", req => !Utilities.EventHandlers.IsShapeshiftSuppressed)
                 );
         }
 
@@ -664,7 +580,7 @@ namespace Singular.ClassSpecific.Druid
         public static Composite CreateBalanceCombatBuffBattlegrounds()
         {
             return new PrioritySelector(
-                Spell.BuffSelf("Moonkin Form"),
+                Spell.BuffSelf("Moonkin Form", req => !Utilities.EventHandlers.IsShapeshiftSuppressed),
 
                 // Symbiosis
 /*
@@ -717,17 +633,22 @@ namespace Singular.ClassSpecific.Druid
         /// <returns></returns>
         public static Composite CreateDruidAvoidanceBehavior(Composite slowAttack, Composite nonfacingAttack, Composite jumpturnAttack)
         {
-            return new PrioritySelector(
-                new Decorator(
-                    ret => MovementManager.IsClassMovementAllowed && DruidSettings.UseWildCharge,
-                    new PrioritySelector(
-                        Disengage.CreateDisengageBehavior("Wild Charge", Disengage.Direction.Backwards, 20, CreateSlowMeleeBehavior()),
-                        Disengage.CreateDisengageBehavior("Displacer Beast", Disengage.Direction.Frontwards, 20, CreateSlowMeleeBehavior())
+            Kite.CreateKitingBehavior(CreateSlowMeleeBehavior(), nonfacingAttack, jumpturnAttack);
+
+            return new Decorator(
+                req => MovementManager.IsClassMovementAllowed,
+                new PrioritySelector(
+                    new Decorator(
+                        ret => Kite.IsDisengageWantedByUserSettings(),
+                        new PrioritySelector(
+                            Disengage.CreateDisengageBehavior("Wild Charge", Disengage.Direction.Backwards, 20, CreateSlowMeleeBehavior()),
+                            Disengage.CreateDisengageBehavior("Displacer Beast", Disengage.Direction.Frontwards, 20, CreateSlowMeleeBehavior())
+                            )
+                        ),
+                    new Decorator(
+                        ret => Kite.IsKitingWantedByUserSettings(),
+                        Kite.BeginKitingBehavior()
                         )
-                    ),
-                new Decorator(
-                    ret => MovementManager.IsClassMovementAllowed && DruidSettings.AllowKiting,
-                    Kite.BeginKitingBehavior()
                     )
                 );
         }
@@ -748,11 +669,13 @@ namespace Singular.ClassSpecific.Druid
                                 new Throttle( 1, Spell.Buff("Faerie Swarm", onUnit => (WoWUnit)onUnit, req => true)),
                                 new Sequence(
                                     Spell.CastOnGround("Wild Mushroom",
-                                        loc => ((WoWUnit)loc).Location,
+                                        on => (WoWUnit) on,
                                         req => req != null && !Spell.IsSpellOnCooldown("Wild Mushroom: Detonate")
                                         ),
-                                    new Wait( 1, until => !Spell.IsGlobalCooldown() && !Spell.IsCastingOrChannelling() && MushroomCount > 0, new ActionAlwaysSucceed()),
-                                    Spell.Cast("Wild Mushroom: Detonate", ret => MushroomCount > 0)
+                                    new Action( r => Logger.WriteDebug( "SlowMelee: waiting for Mushroom to appear")),
+                                    new WaitContinue( TimeSpan.FromMilliseconds(1500), until => !Spell.IsGlobalCooldown() && !Spell.IsCastingOrChannelling() && MushroomCount > 0, new ActionAlwaysSucceed()),
+                                    new Action(r => Logger.WriteDebug("SlowMelee: found {0} mushrooms", MushroomCount)),
+                                    Spell.Cast("Wild Mushroom: Detonate")
                                     )
                                 )
                             )
@@ -763,6 +686,82 @@ namespace Singular.ClassSpecific.Druid
 
         #endregion
 
+
+        private static WaitTimer detonateTimer = new WaitTimer(TimeSpan.FromSeconds(4));
+        private static int checkMushroomCount { get; set; }
+
+        private static Composite CreateMushroomSetAndDetonateBehavior()
+        {
+            return new Decorator( 
+                req => Spell.UseAOE, 
+                new PrioritySelector(
+
+                    new Action( r => { 
+                        checkMushroomCount = MushroomCount; 
+                        return RunStatus.Failure; 
+                        }),
+
+                    // detonate if we have 3 shrooms -or- or timer since last shroom cast has expired
+                    Spell.Cast("Wild Mushroom: Detonate", ret => checkMushroomCount >= 3 || (checkMushroomCount > 0 && detonateTimer.IsFinished )),
+
+                    // Make sure we arenIf Detonate is coming off CD, make sure we drop some more shrooms. 3 seconds is probably a little late, but good enough.
+                    // .. also, waitForSpell must be false since Wild Mushroom does not stop targeting after click like other click on ground spells
+                    // .. will wait locally and fall through to cancel targeting regardless
+                    new Sequence(
+                        Spell.CastOnGround("Wild Mushroom", on => BestAoeTarget, req => checkMushroomCount < 3 && Spell.GetSpellCooldown("Wild Mushroom: Detonate").TotalSeconds < 3f, false),
+                        new Action( ctx => detonateTimer.Reset() ), 
+                        new Action( ctx => Lua.DoString("SpellStopTargeting()"))                       
+                        )
+                    )
+                );
+
+        }
+
+        #region Diagnostics
+
+        private static Composite CreateBalanceDiagnosticOutputBehavior()
+        {
+            if (!SingularSettings.Debug)
+                return new ActionAlwaysFail();
+
+            return new ThrottlePasses(1, 1,
+                new Action(ret =>
+                {
+                    string log;
+                    WoWAura eclips = Me.GetAllAuras().FirstOrDefault(a => a.Name == "Eclipse (Solar)" || a.Name == "Eclipse (Lunar)");
+                    string eclipsString = eclips == null ? "None" : (eclips.Name == "Eclipse (Solar)" ? "Solar" : "Lunar");
+
+                    log = string.Format(".... h={0:F1}%/m={1:F1}%, form:{2}, eclps={3}, towards={4}, eclps#={5}, mushcnt={6}",
+                        Me.HealthPercent,
+                        Me.ManaPercent,
+                        Me.Shapeshift.ToString(),
+                        eclipsString,
+                        GetEclipseDirection().ToString(),
+                        Me.CurrentEclipse,
+                        MushroomCount
+                        );
+
+                    WoWUnit target = Me.CurrentTarget;
+                    if (target != null)
+                    {
+                        log += string.Format(", th={0:F1}%/tm={1:F1}%, dist={2:F1}, face={3}, loss={4}, sfire={5}, mfire={6}",
+                            target.HealthPercent,
+                            target.ManaPercent,
+                            target.Distance,
+                            Me.IsSafelyFacing(target),
+                            target.InLineOfSpellSight,
+                            (long)target.GetAuraTimeLeft("Sunfire", true).TotalMilliseconds,
+                            (long)target.GetAuraTimeLeft("Moonfire", true).TotalMilliseconds
+                            );
+                    }
+
+                    Logger.WriteDebug(Color.AntiqueWhite, log);
+                    return RunStatus.Failure;
+                })
+                );
+        }
+
+        #endregion
     }
 
 }

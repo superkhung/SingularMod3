@@ -38,10 +38,10 @@ namespace Singular.ClassSpecific.Monk
 			return new Decorator(
 				ret => !Spell.IsGlobalCooldown() && !StyxWoW.Me.Mounted,
 				new PrioritySelector(
-                    Spell.WaitForCast(true),
+                    Spell.WaitForCast(FaceDuring.Yes),
 					//cc & interrupt stuff
                     Helpers.Common.CreateInterruptBehavior(),
-						//CD & defense
+					//CD & defense
                     Spell.Cast("Invoke Xuen, the White Tiger", ret => Me.CurrentTarget.IsBoss()),
 					Spell.Cast("Tigereye Brew", ret => Unit.GetAuraStacks(Me, "Tigereye Brew") >= 10),
 					Spell.Cast("Energizing Brew", ret => Me.CurrentEnergy < 30),
@@ -56,7 +56,7 @@ namespace Singular.ClassSpecific.Monk
 					Spell.Cast("Rising Sun Kick", ret => Me.CurrentChi >= 2),
                     Spell.Cast("Fists of Fury", ret => Me.CurrentChi >= 3 && Me.CurrentEnergy < 35 && !Me.IsMoving && Me.HasAura("Tiger Power") && !Me.HasAura("Energizing Brew")),
 
-                    new Decorator(ret => !Spell.IsGlobalCooldown() && Unit.NearbyUnfriendlyUnits.Count(u => u.Distance <= 8) >= SingularSettings.Instance.AOENumber && !Me.HasAura(ReOriginationMastery),
+                    new Decorator(ret => !Spell.IsGlobalCooldown() && Unit.NearbyUnfriendlyUnits.Count(u => u.Distance <= 8) >= SingularSettings.Instance.AOENumber,
 					new PrioritySelector
 					(
                         Spell.Cast("Rising Sun Kick", ret => Me.CurrentChi >= 2),

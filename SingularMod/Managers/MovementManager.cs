@@ -42,7 +42,7 @@ namespace Singular.Managers
         {
             get
             {
-                return !HotkeyDirector.IsMovementEnabled;
+                return !HotkeyDirector.IsMovementEnabled || (SingularRoutine.IsQuestBotActive && StyxWoW.Me.InVehicle);
             }
         }
 
@@ -67,13 +67,15 @@ namespace Singular.Managers
         }
 
         /// <summary>
-        /// True: a bot requiring user interaction is running (LazyRaider, RaidBot, etc.)
+        /// we determine this value locally at present to avoid possible botevent sequence errors
+        /// which would occur if this depended on the SingularRoutine value but this event 
+        /// handler were called before 
         /// </summary>
         /// <remarks>
         /// query the active bot only on a bot event and then cache the result.  we don't
         /// need to check more often than that
         /// </remarks>
-        public static bool IsManualMovementBotActive { get; private set; }
+        private static bool IsManualMovementBotActive { get; set; }
 
         // static INavigationProvider _prevNavigation = null;
         static IPlayerMover _prevPlayerMover = null;
@@ -85,7 +87,7 @@ namespace Singular.Managers
         {
             SingularRoutine.OnBotEvent += (src, arg) =>
             {
-                IsManualMovementBotActive = SingularRoutine.IsBotInUse("LazyRaider", "Raid Bot", "Combat Bot", "Tyrael");
+                IsManualMovementBotActive = SingularRoutine.IsBotInUse("LazyRaider", "Raid Bot");
                 if (arg.Event == SingularBotEvent.BotStart)
                     MovementManager.Start();
                 else if (arg.Event == SingularBotEvent.BotStop)
@@ -184,6 +186,7 @@ namespace Singular.Managers
 
         class NoNavigation : INavigationProvider
         {
+            public bool AtLocation(WoWPoint point1, WoWPoint point2) { return true; }
             public bool CanNavigateFully(WoWPoint from, WoWPoint to, int maxHops) { return true; }
             public bool Clear() { return true; }
             public WoWPoint[] GeneratePath(WoWPoint from, WoWPoint to) { return new WoWPoint[] { new WoWPoint(from.X, from.Y, from.Z) }; }

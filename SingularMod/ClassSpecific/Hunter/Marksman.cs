@@ -30,11 +30,7 @@ namespace Singular.ClassSpecific.Hunter
         public static Composite CreateMarksmanHunterNormalPullAndCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
                 Spell.WaitForCastOrChannel(),
 
@@ -74,6 +70,7 @@ namespace Singular.ClassSpecific.Hunter
                         new Decorator(
                             ret => Spell.UseAOE && !(Me.CurrentTarget.IsBoss() || Me.CurrentTarget.IsPlayer) && Unit.UnfriendlyUnitsNearTarget(8f).Count() >= 3,
                             new PrioritySelector(
+                                Common.CreateHunterTrapBehavior("Explosive Trap", true, on => Me.CurrentTarget, ret => true),
                                 Spell.Cast("Kill Shot", onUnit => Unit.NearbyUnfriendlyUnits.FirstOrDefault(u => u.HealthPercent < 20 && u.Distance < 40 && u.InLineOfSpellSight && Me.IsSafelyFacing(u))),
                                 BuffSteadyFocus(),
                                 Spell.Cast("Aimed Shot", ret => Me.HasAura("Master Marksman", 3)),
@@ -97,7 +94,7 @@ namespace Singular.ClassSpecific.Hunter
                         )
                     ),
 
-                Movement.CreateMoveToTargetBehavior(true, 35f)
+                Movement.CreateMoveToUnitBehavior( on => StyxWoW.Me.CurrentTarget, 35f, 30f)
                 );
         }
 
@@ -108,11 +105,7 @@ namespace Singular.ClassSpecific.Hunter
         public static Composite CreateMarksmanHunterPvPPullAndCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
                 Spell.WaitForCastOrChannel(),
 
@@ -160,7 +153,7 @@ namespace Singular.ClassSpecific.Hunter
                         )
                     ),
 
-                Movement.CreateMoveToTargetBehavior(true, 35f)
+                Movement.CreateMoveToUnitBehavior( on => StyxWoW.Me.CurrentTarget, 35f, 30f)
                 );
         }
 

@@ -32,44 +32,37 @@ namespace Singular.ClassSpecific.Warrior
         public static Composite CreateProtectionNormalPull()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateFaceTargetBehavior(),
-                Movement.CreateMoveToLosBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
                 Helpers.Common.CreateAutoAttack(false),
 
                 Helpers.Common.CreateDismount("Pulling"),
 
-                //Shoot flying targets
+                Spell.WaitForCastOrChannel(),
+
                 new Decorator(
-                    ret => Me.CurrentTarget.IsFlying,
+                    req => !Spell.IsGlobalCooldown(),
                     new PrioritySelector(
-                        Spell.WaitForCast(),
-                        Spell.Cast("Heroic Throw"),
-                        Spell.Cast("Throw"),
-                        Movement.CreateMoveToTargetBehavior(true, 27f)
+                        Common.CreateAttackFlyingOrUnreachableMobs(),
+
+                        Common.CreateChargeBehavior(),
+
+                        //Buff up (or use to generate Rage)
+                        new Throttle( TimeSpan.FromSeconds(1), 
+                            new PrioritySelector(
+
+                                Spell.Cast("Battle Shout", 
+                                    ret => !Me.HasMyAura("Commanding Shout") 
+                                        && (!Me.HasPartyBuff(PartyBuffType.AttackPower) || Me.CurrentRage < 20)),
+
+                                Spell.Cast("Commanding Shout", 
+                                    ret => !Me.HasMyAura("Battle Shout") 
+                                        && (!Me.HasPartyBuff(PartyBuffType.Stamina) || Me.CurrentRage < 20))
+                                )
+                            ),
+
+                        Spell.Cast( "Shield Slam")
                         )
-                    ),
-
-
-                //Buff up (or use to generate Rage)
-                new Throttle( TimeSpan.FromSeconds(1), 
-                    new PrioritySelector(
-
-                        Spell.Cast("Battle Shout", 
-                            ret => !Me.HasMyAura("Commanding Shout") 
-                                && (!Me.HasPartyBuff(PartyBuffType.AttackPower) || Me.CurrentRage < 20)),
-
-                        Spell.Cast("Commanding Shout", 
-                            ret => !Me.HasMyAura("Battle Shout") 
-                                && (!Me.HasPartyBuff(PartyBuffType.Stamina) || Me.CurrentRage < 20))
-                        )
-                    ),
-
-                Common.CreateChargeBehavior(),
-
-                // Move to Melee
-                Movement.CreateMoveToMeleeBehavior(true)
+                    )
                 );
         }
         #endregion
@@ -90,41 +83,52 @@ namespace Singular.ClassSpecific.Warrior
         }
 
         [Behavior(BehaviorType.CombatBuffs, WoWClass.Warrior, WoWSpec.WarriorProtection, WoWContext.All)]
-        public static Composite CreateProtectionNormalCombatBuffs()
+        public static Composite CreateProtectionCombatBuffs()
         {
-            return new PrioritySelector(
-                Spell.WaitForCast(),
+            return new Decorator(
+                req => !Unit.IsTrivial(Me.CurrentTarget),
                 new Throttle(    // throttle these because most are off the GCD
-                    new Decorator( ret => !Spell.IsGlobalCooldown(),
-                        new PrioritySelector(
-                            Spell.Cast("Demoralizing Shout", ret => Unit.NearbyUnfriendlyUnits.Any( m => m.SpellDistance() < 10)),
-                            Spell.BuffSelf("Shield Wall", ret => Me.HealthPercent < WarriorSettings.WarriorShieldWallHealth),
-                            Spell.BuffSelf("Shield Barrier", ret => Me.HealthPercent < WarriorSettings.WarriorShieldBarrierHealth),
-                            Spell.BuffSelf("Shield Block", ret => Me.HealthPercent < WarriorSettings.WarriorShieldBlockHealth),
-                            Spell.BuffSelf("Last Stand", ret => Me.HealthPercent < WarriorSettings.WarriorLastStandHealth),
-                            Spell.BuffSelf("Enraged Regeneration",
-                                ret => Me.HealthPercent < 10 || (Me.ActiveAuras.ContainsKey("Enrage") && Me.HealthPercent < WarriorSettings.WarriorEnragedRegenerationHealth)),
+                    new PrioritySelector(
+                        Spell.OffGCD(Spell.Cast("Demoralizing Shout", ret => Unit.NearbyUnfriendlyUnits.Any(m => m.SpellDistance() < 10))),
 
-                            // Symbiosis
-                            Spell.BuffSelf("Savage Defense", ret => Me.HealthPercent < WarriorSettings.WarriorShieldBlockHealth
-                                    && !StyxWoW.Me.HasAura("Shield Block") && Spell.GetSpellCooldown("Shield Block").TotalSeconds > 0),
+                        Spell.OffGCD( 
+                            new PrioritySelector(
+                                Spell.BuffSelf("Shield Wall", ret => Me.HealthPercent < WarriorSettings.WarriorShieldWallHealth),
+                                Spell.BuffSelf("Shield Barrier", ret => Me.HealthPercent < WarriorSettings.WarriorShieldBarrierHealth),
+                                Spell.BuffSelf("Shield Block", ret => Me.HealthPercent < WarriorSettings.WarriorShieldBlockHealth),
+                                Spell.BuffSelf("Savage Defense", ret => Me.HealthPercent < WarriorSettings.WarriorShieldBlockHealth && !StyxWoW.Me.HasAura("Shield Block") && Spell.GetSpellCooldown("Shield Block").TotalSeconds > 0)
+                                )
+                            ),
 
-                            new Decorator(
-                                ret => Me.GotTarget && (Me.CurrentTarget.IsBoss() || Me.CurrentTarget.IsPlayer || (!Me.IsInGroup() && AoeCount >= 3)),
-                                new PrioritySelector(
-                                    Spell.Cast("Recklessness"),
-                                    Spell.Cast("Skull Banner"),
-                                    // Spell.Cast("Demoralizing Banner", ret => !Me.CurrentTarget.IsBoss() && UseAOE),
-                                    Spell.Cast("Avatar")
-                                    )
-                                ),
+                        Spell.OffGCD(
+                            new PrioritySelector(
+                                Spell.OffGCD(Spell.BuffSelf("Last Stand", ret => Me.HealthPercent < WarriorSettings.WarriorLastStandHealth)),
+                                Spell.OffGCD(Common.CreateWarriorEnragedRegeneration())
+                                )
+                            ),
 
-                            // cast above rage dump so we are sure have rage to do damage
-                            Spell.Cast("Bloodbath"),
-                            Spell.Cast("Berserker Rage")
-                            // new Action(ret => { UseTrinkets(); return RunStatus.Failure; }),
-                            // Spell.Cast("Deadly Calm", ret => TalentManager.HasGlyph("Incite") || Me.CurrentRage >= RageDump)
+                        new Decorator(
+                            req => Me.GotTarget && Me.CurrentTarget.IsWithinMeleeRange,
+                            new PrioritySelector(
+                        // Symbiosis
+
+                                new Decorator(
+                                    ret => Me.CurrentTarget.IsBoss() || Me.CurrentTarget.IsPlayer || (!Me.IsInGroup() && AoeCount >= 3),
+                                    new PrioritySelector(
+                                        Spell.OffGCD( Spell.Cast("Recklessness")),
+                                        Spell.OffGCD( Spell.Cast("Skull Banner")),
+                        // Spell.Cast("Demoralizing Banner", ret => !Me.CurrentTarget.IsBoss() && UseAOE),
+                                        Spell.OffGCD( Spell.Cast("Avatar"))
+                                        )
+                                    ),
+
+                                Spell.Cast("Bloodbath"),
+                                Spell.Cast("Berserker Rage")
+                                )
                             )
+
+                // new Action(ret => { UseTrinkets(); return RunStatus.Failure; }),
+                // Spell.Cast("Deadly Calm", ret => TalentManager.HasGlyph("Incite") || Me.CurrentRage >= RageDump)
                         )
                     )
                 );
@@ -137,9 +141,8 @@ namespace Singular.ClassSpecific.Warrior
         {
             return new PrioritySelector(
                 ctx => TankManager.Instance.FirstUnit ?? Me.CurrentTarget,
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
+
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
                 Helpers.Common.CreateAutoAttack(true),
 
                 Spell.WaitForCast(),
@@ -165,6 +168,8 @@ namespace Singular.ClassSpecific.Warrior
 
                         Spell.Buff("Piercing Howl", ret => Me.CurrentTarget.Distance < 10 && Me.CurrentTarget.IsPlayer && !Me.CurrentTarget.HasAnyAura("Piercing Howl", "Hamstring") && SingularSettings.Instance.Warrior().UseWarriorSlows),
                         Spell.Buff("Hamstring", ret => Me.CurrentTarget.IsPlayer && !Me.CurrentTarget.HasAnyAura("Piercing Howl", "Hamstring") && SingularSettings.Instance.Warrior().UseWarriorSlows),
+
+                        Common.CreateDisarmBehavior(),
 
                         CreateProtectionInterrupt(),
 

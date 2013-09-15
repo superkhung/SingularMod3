@@ -82,7 +82,7 @@ namespace Singular.Helpers
                             new Decorator(ret => Me.Rooted || Me.IsRooted(), new Action(ret => EndKiting("BP: rooted, cancelling"))),
 
                             new Decorator(ret => Me.Location.Distance(safeSpot) < DISTANCE_CLOSE_ENOUGH_TO_DESTINATION, new Action(ret => EndKiting("BP: reached safe spot!!!!"))),
-                            new Decorator(ret => Me.Location.Distance(safeSpot) > DISTANCE_TOO_FAR_FROM_DESTINATION, new Action(ret => EndKiting("BP: too far from safe spot, cancelling"))),
+                            new Decorator(ret => Me.Location.Distance(safeSpot) > DISTANCE_TOO_FAR_FROM_DESTINATION, new Action(ret => EndKiting(string.Format("BP: too far from safe spot ( {0:F1} > {1:F1} yds), cancelling", Me.Location.Distance(safeSpot), DISTANCE_TOO_FAR_FROM_DESTINATION)))),
 
                             new Decorator(ret => bstate == State.Slow,
                                 new PrioritySelector(
@@ -225,14 +225,30 @@ namespace Singular.Helpers
                         )
                     );
 
-            TreeHooks.Instance.ReplaceHook("KitingBehavior", kitingBehavior );
+            TreeHooks.Instance.ReplaceHook(SingularRoutine.HookName("KitingBehavior"), kitingBehavior );
+        }
+
+        public static bool IsDisengageWantedByUserSettings()
+        {
+            return SingularSettings.Instance.DisengageAllowed
+                && !MovementManager.IsMovementDisabled
+                && Me.HealthPercent < SingularSettings.Instance.DisengageHealth
+                && Unit.NearbyUnitsInCombatWithMeOrMyStuff.Count(m => m.SpellDistance() < SingularSettings.Instance.AvoidDistance) >= SingularSettings.Instance.DisengageMobCount;
+        }
+
+        public static bool IsKitingWantedByUserSettings()
+        {
+            return SingularSettings.Instance.KiteAllow 
+                && !MovementManager.IsMovementDisabled
+                && Me.HealthPercent < SingularSettings.Instance.KiteHealth
+                && Unit.NearbyUnitsInCombatWithMeOrMyStuff.Count( m => m.SpellDistance() < SingularSettings.Instance.AvoidDistance) >= SingularSettings.Instance.KiteMobCount;
         }
 
         public static bool IsKitingPossible(int minScan = -1)
         {
             // note:  PullDistance MUST be longer than our out of melee distance (DISTANCE_WE_NEED_TO_START_BACK_PEDDLING)
             // otherwise it will run back and forth
-            if (IsKitingActive() || !Me.IsAlive || Me.IsCasting)
+            if (IsKitingActive() || !Me.IsAlive || Spell.IsCasting())
                 return false;
 
             if (Me.Stunned || Me.IsStunned())
@@ -301,6 +317,7 @@ namespace Singular.Helpers
 
         private static bool BeginKiting(string s)
         {
+            StopMoving.Clear();
             bstate =  _SlowAttackBehavior != null ? State.Slow : State.Moving;
             DISTANCE_TOO_FAR_FROM_DESTINATION = (int) (Me.Location.Distance(safeSpot) + 3);
             Logger.WriteDebug(Color.Gold, s);
@@ -316,7 +333,7 @@ namespace Singular.Helpers
             WoWMovement.StopFace();
             WoWMovement.MoveStop(WoWMovement.MovementDirection.All);
 
-            // TreeHooks.Instance.ReplaceHook("KitingBehavior", kiteBehavior);
+            // TreeHooks.Instance.ReplaceHook(SingularRoutine.LocalHookName("KitingBehavior"), kiteBehavior);
 
             return RunStatus.Success;
         }
@@ -625,7 +642,7 @@ namespace Singular.Helpers
                 && !Me.IsFalling
                 && !Me.IsOnTransport
                 && Me.IsSafelyFacing(bpwjDest)
-                && SpellManager.CanCast("Rocket Jump", Me);
+                && Spell.CanCastHack("Rocket Jump", Me);
         }
 
         private static bool IsKitingNeeded()
@@ -1191,7 +1208,8 @@ namespace Singular.Helpers
                                 return RunStatus.Failure;
                                 })
                             ),
-                        new WaitContinue(1, req => !Me.IsAlive || !Me.IsFalling, new ActionAlwaysSucceed()),
+                        new WaitContinue(TimeSpan.FromMilliseconds(350), req => !Me.IsAlive || Me.IsFalling, new ActionAlwaysSucceed()),
+                        new WaitContinue(TimeSpan.FromMilliseconds(1250), req => !Me.IsAlive || !Me.IsFalling, new ActionAlwaysSucceed()),
                         new Action(ret =>
                         {
                             NextDisengageAllowed = DateTime.Now.Add(TimeSpan.FromMilliseconds(750));
@@ -1221,7 +1239,7 @@ namespace Singular.Helpers
             if (Me.Stunned || Me.Rooted || Me.IsStunned() || Me.IsRooted())
                 return false;
 
-            if (!SpellManager.CanCast(spell, Me, false, false))
+            if (!Spell.CanCastHack(spell, Me))
                 return false;
 
             mobToGetAwayFrom = SafeArea.NearestEnemyMobAttackingMe;

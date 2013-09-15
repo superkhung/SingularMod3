@@ -4,6 +4,7 @@ using Styx.WoWInternals;
 using System;
 using Singular.Settings;
 using Singular.Helpers;
+using System.Drawing;
 
 namespace Singular.Managers
 {
@@ -29,7 +30,7 @@ namespace Singular.Managers
             if (Spell.GcdActive || StyxWoW.Me.IsCasting || StyxWoW.Me.ChanneledSpell != null )
                 return;
 
-            if (e.Destination.Distance(StyxWoW.Me.Location) < Styx.Helpers.CharacterSettings.Instance.MountDistance && (!Battlegrounds.IsInsideBattleground || !PVP.IsPrepPhase))
+            if (e.Destination.Distance(StyxWoW.Me.Location) < Styx.Helpers.CharacterSettings.Instance.MountDistance && (!Battlegrounds.IsInsideBattleground || !PVP.IsPrepPhase) && !Utilities.EventHandlers.IsShapeshiftSuppressed)
             {
                 if (StyxWoW.Me.Class == WoWClass.Shaman && SpellManager.HasSpell("Ghost Wolf") && SingularSettings.Instance.Shaman().UseGhostWolf)
                 {
@@ -40,7 +41,7 @@ namespace Singular.Managers
                         SpellManager.Cast("Ghost Wolf");
                     }
                 }
-                else if (StyxWoW.Me.Class == WoWClass.Druid && SpellManager.HasSpell("Travel Form"))
+                else if (StyxWoW.Me.Class == WoWClass.Druid && SpellManager.HasSpell("Travel Form") && SingularSettings.Instance.Druid().UseTravelForm && StyxWoW.Me.IsOutdoors)
                 {
                     e.Cancel = true;
 
@@ -50,6 +51,13 @@ namespace Singular.Managers
                         SpellManager.Cast("Travel Form");
                     }
                 }
+            }
+
+            // help HB out and stop immediately if we allow mount to proceed
+            if (e.Cancel == false && StyxWoW.Me.IsMoving && Mount.CanMount())
+            {
+                Logger.WriteDebug( Color.White, "OnMountUp: stopping to help HB mount quicker (fewer failed mount attempts)");
+                StopMoving.Now();
             }
         }
     }

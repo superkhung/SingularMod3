@@ -11,21 +11,12 @@ namespace Singular.ClassSpecific.Warlock
 {
     public class Lowbie
     {
-
-
         [Behavior(BehaviorType.Pull | BehaviorType.Combat, WoWClass.Warlock, 0, priority: 1)]
         public static Composite CreateLowbieWarlockCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateAutoAttack(false),
-                Helpers.Common.CreateDismount("Pulling"),
-
-                Movement.CreateEnsureMovementStoppedBehavior( 35f ),
-
-                Spell.WaitForCast(true),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
+                Spell.WaitForCast(FaceDuring.Yes),
 
                 new Decorator( 
                     ret => !Spell.IsGlobalCooldown(),
@@ -39,9 +30,7 @@ namespace Singular.ClassSpecific.Warlock
                         Spell.Buff("Corruption"),
                         Spell.Cast("Shadow Bolt")
                         )
-                    ),
-
-                Movement.CreateMoveToTargetBehavior(true, 35f)
+                    )
                 );
         }
     }

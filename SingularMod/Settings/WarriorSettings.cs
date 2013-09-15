@@ -24,17 +24,24 @@ namespace Singular.Settings
     internal class WarriorSettings : Styx.Helpers.Settings
     {
         public WarriorSettings()
-            : base(Path.Combine(SingularSettings.SettingsPath, "Warrior.xml"))
+            : base(Path.Combine(SingularSettings.SingularSettingsPath, "Warrior.xml"))
         {
         }
 
         #region Protection
+
+        public enum SpellPriority
+        {
+            Noxxic = 1,
+            IcyVeins = 2,
+            ElitistJerks = 3
+        }
+
         [Setting]
-        [DefaultValue(1)]
+        [DefaultValue(SpellPriority.Noxxic)]
         [Category("Arms")]
         [DisplayName("Spell Priority Selection")]
-        [Description("1:Noxxic, 2:IcyVeins")]
-        public int ArmsSpellPriority { get; set; }
+        public SpellPriority ArmsSpellPriority { get; set; }
 
         [Setting]
         [DefaultValue(50)]
@@ -44,7 +51,7 @@ namespace Singular.Settings
         public int WarriorEnragedRegenerationHealth { get; set; }
 
         [Setting]
-        [DefaultValue(20)]
+        [DefaultValue(30)]
         [Category("Protection")]
         [DisplayName("Shield Wall Health")]
         [Description("Shield Wall will be used when your health drops below this value")]
@@ -52,14 +59,14 @@ namespace Singular.Settings
 
 
         [Setting]
-        [DefaultValue(40)]
+        [DefaultValue(20)]
         [Category("Protection")]
         [DisplayName("Last Stand Health")]
         [Description("Last Stand will be used when your health drops below this value")]
         public int WarriorLastStandHealth  { get; set; }
 
         [Setting]
-        [DefaultValue(30)]
+        [DefaultValue(50)]
         [Category("Protection")]
         [DisplayName("Shield Block Health")]
         [Description("Shield Block will be used when your health drops below this value")]
@@ -99,13 +106,6 @@ namespace Singular.Settings
         #endregion
 
         [Setting]
-        [DefaultValue(true)]
-        [Category("DPS")]
-        [DisplayName("Use AOE")]
-        [Description("True / False if you would like to AOE")]
-        public bool UseWarriorAOE { get; set; }
-
-        [Setting]
         [DefaultValue(WarriorStance.Auto)]
         [Category("DPS")]
         [DisplayName("Warrior DPS Stance")]
@@ -125,5 +125,13 @@ namespace Singular.Settings
         [DisplayName("Victory Rush on Cooldown")]
         [Description("True: use Victory Rush/Impending Victory on cooldown regardless of current health %")]
         public bool VictoryRushOnCooldown { get; set; }
+
+        [Setting]
+        [DefaultValue(false)]
+        [Category("General")]
+        [DisplayName("Use Disarm")]
+        [Description("True: use Disarm on cooldown; False: do not cast")]
+        public bool UseDisarm { get; set; }
+
     }
 }

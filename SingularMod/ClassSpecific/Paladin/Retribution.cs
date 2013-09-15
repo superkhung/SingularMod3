@@ -11,6 +11,7 @@ using Styx.WoWInternals;
 using Styx.WoWInternals.WoWObjects;
 using Rest = Singular.Helpers.Rest;
 using System.Drawing;
+using CommonBehaviors.Actions;
 
 namespace Singular.ClassSpecific.Paladin
 {
@@ -43,26 +44,17 @@ namespace Singular.ClassSpecific.Paladin
         public static Composite CreatePaladinRetributionHeal()
         {
             return new PrioritySelector(
-                Spell.WaitForCastOrChannel(),
-                new Decorator(
-                    ret => !Spell.IsGlobalCooldown(),
-                    new PrioritySelector(                       
-                        Spell.Cast("Lay on Hands",
-                            mov => false,
-                            on => Me,
-                            req => Me.GetPredictedHealthPercent(true) <= PaladinSettings.LayOnHandsHealth),
-                        Spell.Cast("Word of Glory",
-                            mov => false,
-                            on => Me,
-                            req => Me.GetPredictedHealthPercent(true) <= PaladinSettings.WordOfGloryHealth && Me.CurrentHolyPower >= 3,
-                            cancel => Me.HealthPercent > PaladinSettings.WordOfGloryHealth),
-                        Spell.Cast("Flash of Light",
-                            mov => false,
-                            on => Me,
-                            req => Me.GetPredictedHealthPercent(true) <= PaladinSettings.RetributionHealHealth,
-                            cancel => Me.HealthPercent > PaladinSettings.RetributionHealHealth)
-                        )
-                    )
+                Spell.BuffSelf("Devotion Aura", req => Me.Silenced),
+                Spell.Cast("Lay on Hands",
+                    mov => false,
+                    on => Me,
+                    req => Me.GetPredictedHealthPercent(true) <= PaladinSettings.SelfLayOnHandsHealth),
+                Common.CreateWordOfGloryBehavior(on => Me),
+                Spell.Cast("Flash of Light",
+                    mov => false,
+                    on => Me,
+                    req => Me.GetPredictedHealthPercent(true) <= PaladinSettings.SelfFlashOfLightHealth,
+                    cancel => Me.HealthPercent > PaladinSettings.SelfFlashOfLightHealth)
                 );
         }
 
@@ -83,15 +75,12 @@ namespace Singular.ClassSpecific.Paladin
 
         #region Normal Rotation
 
-        [Behavior(BehaviorType.Pull | BehaviorType.Combat, WoWClass.Paladin, WoWSpec.PaladinRetribution, WoWContext.Battlegrounds )]
+        [Behavior(BehaviorType.Pull | BehaviorType.Combat, WoWClass.Paladin, WoWSpec.PaladinRetribution, WoWContext.Normal | WoWContext.Battlegrounds )]
         public static Composite CreatePaladinRetributionNormalPullAndCombat()
         {
             return new PrioritySelector(
 
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Combat"),
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
 
                 Spell.WaitForCastOrChannel(),
 
@@ -134,32 +123,46 @@ namespace Singular.ClassSpecific.Paladin
                         Spell.Cast("Holy Prism", on => Group.Tanks.FirstOrDefault(t => t.IsAlive && t.Distance < 40)),
 
                         new Decorator(
-                            ret => _mobCount >= 2 && Spell.UseAOE,
+                            ret => _mobCount >= 2 && Spell.UseAOE && Me.CurrentTarget.IsTrivial(),
                             new PrioritySelector(
-                                //Spell.CastOnGround("Light's Hammer", loc => Me.CurrentTarget.Location, ret => 2 <= Clusters.GetClusterCount(Me.CurrentTarget, Unit.NearbyUnfriendlyUnits, ClusterType.Radius, 10f)),
-
-                                // EJ: Inq > 5HP TV > ES > HoW > Exo > CS > Judge > 3-4HP TV (> SS)
+                                // Bobby53: Inq > 5HP DS > Exo > HotR > 3-4HP DS
                                 Spell.BuffSelf("Inquisition", ret => Me.CurrentHolyPower > 0 && Me.GetAuraTimeLeft("Inquisition", true).TotalSeconds < 4),
-                                Spell.Cast( ret => SpellManager.HasSpell("Divine Storm") ? "Divine Storm" : "Templar's Verdict", ret => Me.CurrentHolyPower == 5),
-                                Spell.Cast("Execution Sentence" ),
-                                Spell.Cast("Hammer of Wrath"),
-                                Spell.Cast("Exorcism"),
-                                Spell.Cast(ret => SpellManager.HasSpell("Divine Storm") ? "Divine Storm" : "Templar's Verdict", ret => Me.CurrentHolyPower >= 3),
-                                Spell.Cast(ret => SpellManager.HasSpell("Hammer of the Righteous") ? "Hammer of the Righteous" : "Crusader Strike"),
-                                Spell.Cast("Judgment"),                            
-                                Spell.BuffSelf("Sacred Shield"),
-                                Movement.CreateMoveToMeleeBehavior(true)
+                                Spell.Cast("Divine Storm", ret => Me.CurrentHolyPower == 5),
+                                Spell.Cast("Exorcism", req => TalentManager.HasGlyph("Mass Exorcism")),
+                                Spell.Cast("Hammer of the Righteous"),
+                                Spell.Cast("Divine Storm", ret => Me.CurrentHolyPower >= 3)
                                 )
                             ),
 
-                        // EJ: Inq > 5HP TV > ES > HoW > Exo > CS > Judge > 3-4HP TV (> SS)
+                        new Decorator(
+                            ret => _mobCount >= 2 && Spell.UseAOE,
+                            new PrioritySelector(
+                                Spell.CastOnGround("Light's Hammer", loc => Me.CurrentTarget.Location, ret => 2 <= Clusters.GetClusterCount(Me.CurrentTarget, Unit.NearbyUnfriendlyUnits, ClusterType.Radius, 10f)),
+
+                                // EJ: Inq > 5HP DS > LH > HoW > Exo > HotR > Judge > 3-4HP DS (> SS)
+                                Spell.BuffSelf("Inquisition", ret => Me.CurrentHolyPower > 0 && Me.GetAuraTimeLeft("Inquisition", true).TotalSeconds < 4),
+                                Spell.Cast(SpellManager.HasSpell("Divine Storm") ? "Divine Storm" : "Templar's Verdict", ret => Me.CurrentHolyPower == 5),
+                                Spell.Cast("Execution Sentence"),
+                                Spell.Cast("Hammer of Wrath"),
+                                Spell.Cast("Exorcism"),
+                                Spell.Cast(SpellManager.HasSpell("Hammer of the Righteous") ? "Hammer of the Righteous" : "Crusader Strike"),
+                                Spell.Cast("Judgment"),
+                                Spell.Cast(SpellManager.HasSpell("Divine Storm") ? "Divine Storm" : "Templar's Verdict", ret => Me.CurrentHolyPower >= 3),
+                                Spell.BuffSelf("Sacred Shield"),
+                                Movement.CreateMoveToMeleeBehavior(true),
+                                new ActionAlwaysSucceed()
+                                )
+                            ),
+
+                        // was EJ: Inq > 5HP TV > ES > HoW > Exo > CS > Judge > 3-4HP TV (> SS)
+                        // now EJ: Inq > 5HP TV > ES > HoW > CS > Judge > Exo > 3-4HP TV (> SS)
                         Spell.BuffSelf("Inquisition", ret => Me.CurrentHolyPower > 0 && Me.GetAuraTimeLeft("Inquisition", true).TotalSeconds < 4),
                         Spell.Cast( "Templar's Verdict", ret => Me.CurrentHolyPower == 5),
                         Spell.Cast("Execution Sentence" ),
                         Spell.Cast("Hammer of Wrath"),
-                        Spell.Cast("Exorcism"),
                         Spell.Cast("Crusader Strike"),
                         Spell.Cast("Judgment"),
+                        Spell.Cast("Exorcism"),
                         Spell.Cast("Templar's Verdict", ret => Me.CurrentHolyPower >= 3),
                         Spell.BuffSelf("Sacred Shield")
                         )
@@ -184,14 +187,11 @@ namespace Singular.ClassSpecific.Paladin
 
         #region Instance Rotation
 
-        [Behavior(BehaviorType.Heal | BehaviorType.Pull | BehaviorType.Combat, WoWClass.Paladin, WoWSpec.PaladinRetribution, WoWContext.Instances | WoWContext.Normal)]
+        [Behavior(BehaviorType.Pull | BehaviorType.Combat, WoWClass.Paladin, WoWSpec.PaladinRetribution, WoWContext.Instances)]
         public static Composite CreatePaladinRetributionInstancePullAndCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
 
                 Spell.WaitForCastOrChannel(),
 
@@ -205,7 +205,7 @@ namespace Singular.ClassSpecific.Paladin
                             return RunStatus.Failure;
                         }),
 
-                       // CreateRetDiagnosticOutputBehavior(),
+                        CreateRetDiagnosticOutputBehavior(),
 
                         Helpers.Common.CreateAutoAttack(true),
 
@@ -229,9 +229,44 @@ namespace Singular.ClassSpecific.Paladin
                         Spell.BuffSelf("Divine Protection",
                             ret => Me.HealthPercent <= PaladinSettings.DivineProtectionHealthProt),
 
-                        //Common.CreatePaladinSealBehavior(),
+                        Common.CreatePaladinSealBehavior(),
 
-                        Spell.Cast( "Execution Sentence", ret => Me.CurrentTarget.TimeToDeath() > 12 && Me.CurrentTarget.IsBoss),
+                        new Throttle( 40,
+                            new Decorator(
+                                ret => PartyBuff.WeHaveBloodlust,
+                                new PrioritySelector(
+                                    ctx => Item.FindFirstUsableItemBySpell("Golem's Strength", "Potion of Mogu Power"),
+                                    new Decorator(
+                                        ret => ret != null,
+                                        new Action(item => ((WoWItem)item).Use() )
+                                        )
+                                    )
+                                )
+                            ),
+
+                        new Decorator(
+                            ret => Me.CurrentTarget.IsWithinMeleeRange && PaladinSettings.RetAvengAndGoatK,
+                            new PrioritySelector(
+                                Spell.Cast("Guardian of Ancient Kings",
+                                    ret => Me.CurrentTarget.IsBoss()
+                                        && Me.ActiveAuras.ContainsKey("Inquisition")),
+                                Spell.BuffSelf("Avenging Wrath", 
+                                    ret => Me.ActiveAuras.ContainsKey("Inquisition")
+                                        && (Common.HasTalent(PaladinTalents.SanctifiedWrath) || Spell.GetSpellCooldown("Guardian of Ancient Kings").TotalSeconds <= 290)),
+                                Spell.Cast("Holy Avenger", ret => Me.HasAura("Avenging Wrath"))
+                                )
+                            ),
+
+                        // react to Divine Purpose proc
+                        new Decorator(
+                            ret => Me.GetAuraTimeLeft("Divine Purpose", true).TotalSeconds > 0,
+                            new PrioritySelector(
+                                Spell.BuffSelf("Inquisition", ret => Me.GetAuraTimeLeft("Inquisition", true).TotalSeconds <= 2),
+                                Spell.Cast("Templar's Verdict")
+                                )
+                            ),
+
+                        Spell.Cast( "Execution Sentence", ret => Me.CurrentTarget.TimeToDeath() > 12 ),
                         Spell.Cast( "Holy Prism", on => Group.Tanks.FirstOrDefault( t => t.IsAlive && t.Distance < 40)),
 
                         //Use Synapse Springs Engineering thingy if inquisition is up
@@ -244,12 +279,11 @@ namespace Singular.ClassSpecific.Paladin
                                 // EJ Multi Rotation: Inq > 5HP TV > ES > HoW > Exo > CS > Judge > 3-4HP TV (> SS)
                                 Spell.BuffSelf("Inquisition", ret => Me.CurrentHolyPower > 0 && Me.GetAuraTimeLeft("Inquisition", true).TotalSeconds < 3),
                                 Spell.Cast(ret => SpellManager.HasSpell("Divine Storm") ? "Divine Storm" : "Templar's Verdict", ret => Me.CurrentHolyPower == 5),
-                                Spell.Cast("Execution Sentence", ret => Me.CurrentTarget.IsBoss),
+                                Spell.Cast("Execution Sentence"),
                                 Spell.Cast("Hammer of Wrath"),
-                                Spell.Cast("Exorcism", ret => Me.CurrentTarget.IsWithinMeleeRange),
+                                Spell.Cast("Exorcism"),
                                 Spell.Cast("Hammer of the Righteous"),
                                 Spell.Cast(ret => SpellManager.HasSpell("Hammer of the Righteous") ? "Hammer of the Righteous" : "Crusader Strike"),
-                                Spell.Cast("Judgment", ret => Unit.NearbyUnfriendlyUnits.FirstOrDefault(u => u.Distance.Between(0, 20) && Me.IsSafelyFacing(u)), ret => Me.HasAura("Glyph of Double Jeopardy")),
                                 Spell.Cast("Judgment"),
                                 Spell.Cast(ret => SpellManager.HasSpell("Divine Storm") ? "Divine Storm" : "Templar's Verdict", ret => Me.CurrentHolyPower >= 3),
                                 Spell.BuffSelf("Sacred Shield"),
@@ -258,16 +292,18 @@ namespace Singular.ClassSpecific.Paladin
                             ),
 
                         // Single Target Priority - EJ: Inq > 5HP TV > ES > HoW > Exo > CS > Judge > 3-4HP TV (> SS)
-                        Spell.Cast("Guardian of Ancient Kings", ret => Me.CurrentTarget.IsBoss() && Me.ActiveAuras.ContainsKey("Inquisition")),
-                        Spell.BuffSelf("Avenging Wrath", ret => Me.CurrentTarget.IsBoss() && Me.ActiveAuras.ContainsKey("Inquisition") && (Common.HasTalent(PaladinTalents.SanctifiedWrath) || Me.CurrentTarget.IsBoss() && Spell.GetSpellCooldown("Guardian of Ancient Kings").TotalSeconds <= 290)),
                         Spell.BuffSelf("Inquisition", ret => Me.CurrentHolyPower > 0 && Me.GetAuraTimeLeft("Inquisition", true).TotalSeconds <= 2),
-                        Spell.Cast("Exorcism", ret => Me.CurrentTarget.IsWithinMeleeRange),
-                        Spell.Cast("Templar's Verdict", ret => Me.CurrentHolyPower >= 3),
-                        Spell.Cast("Execution Sentence", ret => Me.CurrentTarget.IsBoss),
-                        Spell.Cast("Hammer of Wrath"),                       
+                        Spell.Cast("Templar's Verdict", ret => Me.CurrentHolyPower >= 5),
+                        Spell.Cast("Execution Sentence"),
+                        Spell.Cast("Hammer of Wrath"),
+                        Spell.Cast("Exorcism"),
                         Spell.Cast("Crusader Strike"),
                         Spell.Cast("Judgment"),
-                        Spell.BuffSelf("Sacred Shield")
+                        Spell.Cast("Templar's Verdict", ret => Me.CurrentHolyPower >= 3),
+                        Spell.BuffSelf("Sacred Shield"),
+
+                        // Symbiosis
+                        Spell.Cast("Wrath", ret => !Me.CurrentTarget.IsWithinMeleeRange && Me.CurrentTarget.Distance < 40)
                         )
                     ),
 

@@ -24,6 +24,29 @@ namespace Singular.Helpers
         private static LocalPlayer Me { get { return StyxWoW.Me; } }
 
         /// <summary>
+        /// 
+        /// </summary>
+        public static bool UseLongCoolDownAbility
+        {
+            get
+            {
+                if (!Me.GotTarget)
+                    return false;
+
+                if (SingularRoutine.CurrentWoWContext == WoWContext.Instances)
+                    return Me.CurrentTarget.IsBoss();
+
+                if (Me.CurrentTarget.IsPlayer)
+                    return Me.CurrentTarget.TimeToDeath() > 3;
+
+                if (Me.CurrentTarget.TimeToDeath() > 30)
+                    return true;
+
+                return Unit.NearbyUnitsInCombatWithMeOrMyStuff.Count(u => u.Guid != Me.CurrentTargetGuid) >= 3;
+            }
+        }
+
+        /// <summary>
         ///  Creates a behavior to start auto attacking to current target.
         /// </summary>
         /// <remarks>
@@ -69,7 +92,7 @@ namespace Singular.Helpers
                             ret => Me.GotAlivePet && (!Me.Pet.GotTarget || Me.Pet.CurrentTargetGuid != Me.CurrentTargetGuid),
                             new Action( delegate
                                 {
-                                    PetManager.CastPetAction("Attack");
+                                    PetManager.CastPetAction("Attack", Me.CurrentTarget);
                                     return RunStatus.Failure;
                                 })
                             )
@@ -139,11 +162,11 @@ namespace Singular.Helpers
         /// </summary>
         public static Composite CreateInterruptBehavior()
         {
-            if ( SingularSettings.Instance.InterruptTarget == InterruptType.None )
+            if ( SingularSettings.Instance.InterruptTarget == CheckTargets.None )
                 return new ActionAlwaysFail();
 
             Composite actionSelectTarget;
-            if (SingularSettings.Instance.InterruptTarget == InterruptType.Target)
+            if (SingularSettings.Instance.InterruptTarget == CheckTargets.Current)
                 actionSelectTarget = new Action( 
                     ret => {
                         WoWUnit u = Me.CurrentTarget;
@@ -156,7 +179,7 @@ namespace Singular.Helpers
             {
                 actionSelectTarget = new Action( 
                     ret => { 
-                        _unitInterrupt = Unit.NearbyUnfriendlyUnits.Where(u => IsInterruptTarget(u)).OrderBy( u => u.Distance ).FirstOrDefault();
+                        _unitInterrupt = Unit.NearbyUnitsInCombatWithMeOrMyStuff.Where(u => IsInterruptTarget(u)).OrderBy( u => u.Distance ).FirstOrDefault();
                         if (_unitInterrupt != null && SingularSettings.Debug)
                             Logger.WriteDebug("Possible Interrupt Target: {0} @ {1:F1} yds casting {2} #{3} for {4} ms", _unitInterrupt.SafeName(), _unitInterrupt.Distance, _unitInterrupt.CastingSpell.Name, _unitInterrupt.CastingSpell.Id, _unitInterrupt.CurrentCastTimeLeft.TotalMilliseconds);
                         }
@@ -219,10 +242,10 @@ namespace Singular.Helpers
             #region 8 Yard Range
 
             if ( Me.Race == WoWRace.BloodElf )
-                prioSpell.AddChild(Spell.Cast("Arcane Torrent", ctx => _unitInterrupt, req => _unitInterrupt.Distance < 8 && !Unit.NearbyUnfriendlyUnits.Any(u => u.IsSensitiveDamage( 8f))));
+                prioSpell.AddChild(Spell.Cast("Arcane Torrent", ctx => _unitInterrupt, req => _unitInterrupt.Distance < 8 && !Unit.NearbyUnfriendlyUnits.Any(u => u.IsSensitiveDamage( 8))));
 
             if ( Me.Race == WoWRace.Tauren)
-                prioSpell.AddChild(Spell.Cast("War Stomp", ctx => _unitInterrupt, ret => _unitInterrupt.Distance < 8 && !_unitInterrupt.IsBoss() && !Unit.NearbyUnfriendlyUnits.Any(u => u.IsSensitiveDamage( 8f))));
+                prioSpell.AddChild(Spell.Cast("War Stomp", ctx => _unitInterrupt, ret => _unitInterrupt.Distance < 8 && !_unitInterrupt.IsBoss() && !Unit.NearbyUnfriendlyUnits.Any(u => u.IsSensitiveDamage( 8))));
 
             #endregion
 
@@ -242,7 +265,7 @@ namespace Singular.Helpers
             #region 25 yards
 
             if ( Me.Class == WoWClass.Shaman)
-                prioSpell.AddChild( Spell.Cast("Wind Shear", ctx => _unitInterrupt));
+                prioSpell.AddChild( Spell.Cast("Wind Shear", ctx => _unitInterrupt, req => Me.IsSafelyFacing(_unitInterrupt)));
 
             #endregion
 
@@ -282,12 +305,14 @@ namespace Singular.Helpers
 
             #endregion
 
-            return new Sequence(
-                actionSelectTarget,               
-                new Decorator(
-                    ret => _unitInterrupt != null,
-                    // majority of these are off GCD, so throttle all to avoid most fail messages
-                    new Throttle( TimeSpan.FromMilliseconds(500), prioSpell )
+            return new Throttle( 
+                new Sequence(
+                    actionSelectTarget,               
+                    new Decorator(
+                        ret => _unitInterrupt != null,
+                        // majority of these are off GCD, so throttle all to avoid most fail messages
+                        new Throttle( TimeSpan.FromMilliseconds(500), prioSpell )
+                        )
                     )
                 );
         }
@@ -328,7 +353,7 @@ namespace Singular.Helpers
                             new DecoratorContinue(ret => StyxWoW.Me.IsMoving,
                                 new Sequence(
                                     new Action(ret => Logger.WriteDebug("Stopping to descend..." + (!string.IsNullOrEmpty(reason) ? (" Reason: " + reason) : string.Empty))),
-                                    new Action(ret => WoWMovement.MoveStop()),
+                                    new Action(ret => StopMoving.Now()),
                                     new Wait( 1, ret => !StyxWoW.Me.IsMoving, new ActionAlwaysSucceed())
                                     )
                                 ),
@@ -370,10 +395,7 @@ namespace Singular.Helpers
                 new PrioritySelector(
                     new Decorator(
                         ret => StyxWoW.Me.IsMoving,
-                        new Sequence( 
-                            new Action(ret => Logger.WriteDebug("Stopping..." + (!string.IsNullOrEmpty(reason) ? (" Reason: " + reason) : string.Empty))),
-                            Movement.CreateEnsureMovementStoppedBehavior()
-                            )
+                        Movement.CreateEnsureMovementStoppedBehavior( reason: string.IsNullOrEmpty(reason) ? string.Empty : (" StopDismount Reason: " + reason))
                         ),
 
                     CreateDismount( reason)
@@ -415,17 +437,145 @@ namespace Singular.Helpers
 
         #endregion
 
-        private static readonly WaitTimer InterruptTimer = new WaitTimer(TimeSpan.FromMilliseconds(500));
-
-        private static bool PreventDoubleInterrupt
+        public static Composite EnsureReadyToAttackFromMelee()
         {
-            get
-            {               
-                var tmp = InterruptTimer.IsFinished;
-                if (tmp)
-                    InterruptTimer.Reset();
-                return tmp;
+            PrioritySelector prio = new PrioritySelector(
+                Safers.EnsureTarget() ,
+                Movement.CreateMoveToLosBehavior(),
+                Movement.CreateFaceTargetBehavior(),
+                new Decorator(
+                    req => Me.GotTarget && Me.CurrentTarget.Distance < SingularSettings.Instance.MeleeDismountRange,
+                    Helpers.Common.CreateDismount( Dynamics.CompositeBuilder.CurrentBehaviorType.ToString())   // should be Pull or Combat 99% of the time
+                    )
+                );
+
+            if (Dynamics.CompositeBuilder.CurrentBehaviorType == BehaviorType.Pull)
+            {
+                prio.AddChild(
+                    new PrioritySelector(
+                        ctx => Me.GotTarget && Me.CurrentTarget.IsAboveTheGround(),
+                        new Decorator(
+                            req => (bool)req,
+                            new PrioritySelector(
+                                Movement.CreateMoveToUnitBehavior(on => Me.CurrentTarget, 27, 22),
+                                Movement.CreateEnsureMovementStoppedBehavior(22)
+                                )
+                            ),
+                        new Decorator(
+                            req => !(bool)req,
+                            new PrioritySelector(
+                                Movement.CreateMoveToMeleeBehavior(true),
+                                Movement.CreateEnsureMovementStoppedWithinMelee()
+                                )
+                            )
+                        )
+                    );
             }
+            else
+            {
+                prio.AddChild( Movement.CreateMoveToMeleeBehavior(true));
+                prio.AddChild(Movement.CreateEnsureMovementStoppedWithinMelee());
+            }
+
+            return prio;
         }
+
+        public static Composite EnsureReadyToAttackFromMediumRange( )
+        {
+            return new PrioritySelector(
+                Safers.EnsureTarget(),
+                Movement.CreateMoveToLosBehavior(),
+                Movement.CreateFaceTargetBehavior(),
+                Helpers.Common.CreateDismount(Dynamics.CompositeBuilder.CurrentBehaviorType.ToString()),   // should be Pull or Combat 99% of the time
+                Movement.CreateMoveToUnitBehavior(on => Me.CurrentTarget, 30, 25),
+                Movement.CreateEnsureMovementStoppedBehavior(25f)
+                );
+        }
+
+        public static Composite EnsureReadyToAttackFromLongRange()
+        {
+            return new PrioritySelector(
+                Safers.EnsureTarget(),
+                Movement.CreateMoveToLosBehavior(),
+                Movement.CreateFaceTargetBehavior(),
+                Helpers.Common.CreateDismount(Dynamics.CompositeBuilder.CurrentBehaviorType.ToString()),   // should be Pull or Combat 99% of the time
+                Movement.CreateMoveToUnitBehavior(on => Me.CurrentTarget, 40, 36),
+                Movement.CreateEnsureMovementStoppedBehavior(36f)
+                );
+        }
+
+        static DateTime brezStart = DateTime.Now;
+        static ulong brezPrevGuid = 0;
+
+        public static Composite CreateCombatRezBehavior(string spellName, SimpleBooleanDelegate unitFilter = null, SimpleBooleanDelegate requirements = null)
+        {
+            UnitSelectionDelegate onUnit;
+
+            if (unitFilter == null)
+                unitFilter = req => true;
+
+            if (requirements == null)
+                requirements = req => true;
+
+            switch (SingularSettings.Instance.CombatRezTarget)
+            {
+                default:
+                    onUnit = null;
+                    break;
+                case CombatRezTarget.Tank:
+                    onUnit = on => Group.Tanks.FirstOrDefault(t => !t.IsMe && t.IsDead && unitFilter(t) && t.SpellDistance() < SingularSettings.Instance.MaxHealTargetRange);
+                    break;
+                case CombatRezTarget.Healer:
+                    onUnit = on => Group.Healers.FirstOrDefault(h => !h.IsMe && h.IsDead && unitFilter(h) && h.SpellDistance() < SingularSettings.Instance.MaxHealTargetRange);
+                    break;
+                case CombatRezTarget.TankOrHealer:
+                    onUnit = on => Group.Tanks.FirstOrDefault(t => !t.IsMe && t.IsDead && unitFilter(t) && t.SpellDistance() < SingularSettings.Instance.MaxHealTargetRange)
+                        ?? Group.Healers.FirstOrDefault(h => !h.IsMe && h.IsDead && unitFilter(h) && h.SpellDistance() < SingularSettings.Instance.MaxHealTargetRange);
+                    break;
+                case CombatRezTarget.DPS:
+                    onUnit = on => Group.Dps.FirstOrDefault(d => !d.IsMe && d.IsDead && unitFilter(d) && d.SpellDistance() < SingularSettings.Instance.MaxHealTargetRange);
+                    break;
+                case CombatRezTarget.All:
+                    onUnit = on => (Group.Tanks.FirstOrDefault(t => !t.IsMe && t.IsDead && unitFilter(t) && t.SpellDistance() < SingularSettings.Instance.MaxHealTargetRange)
+                        ?? Group.Healers.FirstOrDefault(h => !h.IsMe && h.IsDead && unitFilter(h) && h.SpellDistance() < SingularSettings.Instance.MaxHealTargetRange))
+                            ?? Group.Dps.FirstOrDefault(d => !d.IsMe && d.IsDead && unitFilter(d) && d.SpellDistance() < SingularSettings.Instance.MaxHealTargetRange);
+                    break;
+            }
+
+            if (onUnit == null)
+            {
+                Logger.WriteDebug("CreateRebirthBehavior: error - onUnit == null");
+                return new PrioritySelector();
+            }
+
+            // throttle to minimize the impact of the list searches to once every interval
+            return new ThrottlePasses( 1, 1,
+                new Decorator(
+                    req => Me.Combat && Spell.GetSpellCooldown(spellName) == TimeSpan.Zero && requirements(req),
+                    new PrioritySelector(
+                        ctx => onUnit(ctx),
+                        new Decorator(
+                            ret => onUnit(ret) != null,
+                            new PrioritySelector(
+                                new Action( on => {
+                                    if (((WoWUnit)on).Guid != brezPrevGuid)
+                                    {
+                                        brezPrevGuid = ((WoWUnit)on).Guid;
+                                        brezStart = DateTime.Now + TimeSpan.FromSeconds( SingularSettings.Instance.CombatRezDelay);
+                                        Logger.Write(Color.White,"^Combat Ressurrect: {0} @ {1:F1} yds in {2} seconds", ((WoWUnit)on).SafeName(), ((WoWUnit)on).SpellDistance(), SingularSettings.Instance.CombatRezDelay);
+                                    }
+                                    return RunStatus.Failure;
+                                }),
+                                Movement.CreateMoveToLosBehavior(on => (WoWUnit) on),
+                                Movement.CreateMoveToUnitBehavior(on => (WoWUnit)on, 40f, 40f),
+                                new Wait( SingularSettings.Instance.CombatRezDelay, until => brezStart < DateTime.Now, new ActionAlwaysFail()),
+                                Spell.Cast(spellName, mov => true, on => (WoWUnit)on, requirements, cancel => ((WoWUnit)cancel).IsAlive)
+                                )
+                            )
+                        )
+                    )
+                );
+        }
+
     }
 }

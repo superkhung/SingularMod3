@@ -13,6 +13,8 @@ using Singular.Settings;
 using Styx.Common;
 using System.Diagnostics;
 using Styx.Common.Helpers;
+using System.Drawing;
+using Styx.WoWInternals.DBC;
 
 namespace Singular.Helpers
 {
@@ -33,6 +35,48 @@ namespace Singular.Helpers
             return unit.CreatureType == WoWCreatureType.Undead
                     || unit.CreatureType == WoWCreatureType.Demon;
         }
+
+        public static bool IsMelee(this WoWUnit unit)
+        {
+            if (unit.Class == WoWClass.DeathKnight
+                || unit.Class == WoWClass.Paladin
+                || unit.Class == WoWClass.Rogue
+                || unit.Class == WoWClass.Warrior)
+                return true;
+
+            if (!unit.IsMe)
+            {
+                if (unit.Class == WoWClass.Hunter
+                    || unit.Class == WoWClass.Mage
+                    || unit.Class == WoWClass.Priest
+                    || unit.Class == WoWClass.Warlock)
+                    return false;
+
+                if (unit.Class == WoWClass.Monk)    // treat all enemy Monks as melee
+                    return true;
+
+                if (unit.Class == WoWClass.Druid && unit.HasAnyAura("Cat Form", "Bear Form"))
+                    return true;
+
+                if (unit.Class == WoWClass.Shaman && unit.GetAllAuras().Any(a => a.Name == "Unleashed Rage" && a.CreatorGuid == unit.Guid))
+                    return true;
+
+                return false;
+            }
+
+            switch (StyxWoW.Me.Specialization)
+            {
+                case WoWSpec.DruidFeral:
+                case WoWSpec.DruidGuardian:
+                case WoWSpec.MonkBrewmaster:
+                case WoWSpec.MonkWindwalker:
+                case WoWSpec.ShamanEnhancement:
+                    return true;
+            }
+
+            return false;
+        }
+
 
         /// <summary>
         /// List of WoWPlayer in your Group. Deals with Party / Raid in a list independent manner and does not restrict distance
@@ -131,48 +175,88 @@ namespace Singular.Helpers
         ///   Gets the nearby unfriendly units within 40 yards.
         /// </summary>
         /// <value>The nearby unfriendly units.</value>
+        public static IEnumerable<WoWUnit> UnfriendlyUnits(int maxSpellDist)
+        {
+            Type typeWoWUnit = typeof(WoWUnit);
+            Type typeWoWPlayer = typeof(WoWPlayer);
+            List<WoWObject> objectList = ObjectManager.ObjectList;
+            List<WoWUnit> list = new List<WoWUnit>();
+            for (int i = 0; i < objectList.Count; i++)
+            {
+                Type type = objectList[i].GetType();
+                if (type == typeWoWUnit || type == typeWoWPlayer)
+                {
+                    WoWUnit t = objectList[i] as WoWUnit;
+                    if (t != null && ValidUnit(t) && t.SpellDistance() < maxSpellDist )
+                    {
+                        list.Add(t);
+                    }
+                }
+            }
+            return list;
+        }
+
+        /// <summary>
+        ///   Gets the nearby unfriendly units within 40 yards.
+        /// </summary>
+        /// <value>The nearby unfriendly units.</value>
         public static IEnumerable<WoWUnit> NearbyUnfriendlyUnits
         {
             get
             {
-                Type typeWoWUnit = typeof(WoWUnit);
-                Type typeWoWPlayer = typeof(WoWPlayer);
-                List<WoWObject> objectList = ObjectManager.ObjectList;
-                List<WoWUnit> list = new List<WoWUnit>();
-                for (int i = 0; i < objectList.Count; i++)
-                {
-                    Type type = objectList[i].GetType();
-                    if (type == typeWoWUnit || type == typeWoWPlayer)
-                    {
-                        WoWUnit t = objectList[i] as WoWUnit;
-                        if (t != null && ValidUnit(t) && t.Distance < 40)
-                        {
-                            list.Add(t);
-                        }
-                    }
-                }
-                return list;
+                return UnfriendlyUnits(40);
             }
         }
 
         public static IEnumerable<WoWUnit> NearbyUnitsInCombatWithMe
         {
-            get { return NearbyUnfriendlyUnits.Where(p => ValidUnit(p) && p.DistanceSqr <= 40 * 40 && p.Combat && (p.TaggedByMe || p.IsTargetingMeOrPet)); }
+            get { return NearbyUnfriendlyUnits.Where(p => p.Combat && p.CurrentTargetGuid == StyxWoW.Me.Guid); }
+        }
+
+        public static IEnumerable<WoWUnit> NearbyUnitsInCombatWithMeOrMyStuff
+        {
+            get { return NearbyUnfriendlyUnits.Where(p => p.Combat && (p.TaggedByMe || (p.GotTarget && p.IsTargetingMyStuff()))); }
+        }
+
+        public static IEnumerable<WoWUnit> NearbyUnitsInCombatWithUsOrOurStuff
+        {
+            get { return NearbyUnfriendlyUnits.Where(p => p.Combat && (p.TaggedByMe || (p.GotTarget && p.IsTargetingUs()))); }
         }
 
 
-        public static bool ValidUnit(WoWUnit p)
+        private static Color invalidColor = Color.LightCoral;
+
+        public static bool ValidUnit(WoWUnit p, bool showReason = false)
         {
-            if (StyxWoW.Me.IsInInstance && IgnoreMobs.Contains(p.Entry))
+            if (p == null || !p.IsValid)
                 return false;
 
-            // Ignore shit we can't select/attack
-            if (!p.CanSelect || !p.Attackable)
+            if (StyxWoW.Me.IsInInstance && IgnoreMobs.Contains(p.Entry))
+            {
+                if (showReason) Logger.Write(invalidColor, "invalid attack unit {0} is an Instance Ignore Mob", p.SafeName());
                 return false;
+            }
+
+            // Ignore shit we can't select
+            if (!p.CanSelect )
+            {
+                if (showReason) Logger.Write(invalidColor, "invalid attack unit {0} cannot be Selected", p.SafeName());
+                return false;
+            }
+
+            // Ignore shit we can't attack
+            if (!p.Attackable)
+            {
+                if (showReason) Logger.Write(invalidColor, "invalid attack unit {0} cannot be Attacked", p.SafeName());
+                return false;
+            }
 
             // Duh
             if (p.IsDead)
+            {
+                if (showReason) Logger.Write(invalidColor, "invalid attack unit {0} is already Dead", p.SafeName());
                 return false;
+            }
 
             // check for enemy players here as friendly only seems to work on npc's
             if (p.IsPlayer)
@@ -180,36 +264,82 @@ namespace Singular.Helpers
 
             // Ignore friendlies!
             if (p.IsFriendly)
+            {
+                if (showReason) Logger.Write(invalidColor, "invalid attack unit {0} is Friendly", p.SafeName());
                 return false;
+            }
 
             // Dummies/bosses are valid by default. Period.
             if (p.IsTrainingDummy() || p.IsBoss())
                 return true;
 
             // If it is a pet/minion/totem, lets find the root of ownership chain
-            WoWUnit pOwner = p;
+            WoWUnit pOwner = GetPlayerParent(p);
+
+            // ignore if owner is player, alive, and not blacklisted then ignore (since killing owner kills it)
+            if (pOwner != null && pOwner.IsAlive && !Blacklist.Contains(pOwner, BlacklistFlags.Combat))
+            {
+                if (showReason) Logger.Write(invalidColor, "invalid attack unit {0} has a Player as Parent", p.SafeName());
+                return false;
+            }
+
+            // And ignore critters (except for those ferocious ones) /non-combat pets
+            if (p.IsNonCombatPet)
+            {
+                if (showReason) Logger.Write(invalidColor, "{0} is a Noncombat Pet", p.SafeName());
+                return false;
+            }
+
+            // And ignore critters (except for those ferocious ones) /non-combat pets
+            if (p.IsCritter && p.ThreatInfo.ThreatValue == 0 && !p.IsTargetingMyRaidMember)
+            {
+                if (showReason) Logger.Write(invalidColor, "{0} is a Critter", p.SafeName());
+                return false;
+            }
+            /*
+                        if (p.CreatedByUnitGuid != 0 || p.SummonedByUnitGuid != 0)
+                            return false;
+            */
+            return true;
+        }
+
+        public static uint TrivialHealth()
+        {
+            float trivialHealth = (0.01f * SingularSettings.Instance.TrivialMaxHealthPcnt) * StyxWoW.Me.MaxHealth;
+            return (uint)trivialHealth;
+        }
+
+        public static bool IsTrivial(this WoWUnit unit)
+        {
+            if (SingularRoutine.CurrentWoWContext != WoWContext.Normal)
+                return false;
+
+            if (unit == null)
+                return false;
+
+            return unit.MaxHealth <= TrivialHealth();
+        }
+
+        public static WoWUnit GetPlayerParent(WoWUnit unit)
+        {
+            // If it is a pet/minion/totem, lets find the root of ownership chain
+            WoWUnit pOwner = unit;
             while (true)
             {
                 if (pOwner.OwnedByUnit != null)
                     pOwner = pOwner.OwnedByRoot;
+                else if (pOwner.CreatedByUnit != null)
+                    pOwner = pOwner.CreatedByUnit;
                 else if (pOwner.SummonedByUnit != null)
                     pOwner = pOwner.SummonedByUnit;
-                else 
+                else
                     break;
             }
 
-            // ignore if owner is player, alive, and not blacklisted then ignore (since killing owner kills it)
-            if (p != pOwner && pOwner.IsPlayer && pOwner.IsAlive && !Blacklist.Contains(pOwner, BlacklistFlags.Combat))
-                return false;
+            if (unit != pOwner && pOwner.IsPlayer)
+                return pOwner;
 
-            // And ignore critters (except for those ferocious ones) /non-combat pets
-            if (p.IsNonCombatPet || p.IsCritter && p.ThreatInfo.ThreatValue == 0 && !p.IsTargetingMyRaidMember)
-                return false;
-/*
-            if (p.CreatedByUnitGuid != 0 || p.SummonedByUnitGuid != 0)
-                return false;
-*/
-            return true;
+            return null;
         }
 
         /// <summary>
@@ -222,7 +352,7 @@ namespace Singular.Helpers
             var dist = distance * distance;
             var curTarLocation = StyxWoW.Me.CurrentTarget.Location;
             return NearbyUnfriendlyUnits.Where(
-                        p => ValidUnit(p) && p.Location.DistanceSqr(curTarLocation) <= dist).ToList();
+                        p => p.Location.DistanceSqr(curTarLocation) <= dist).ToList();
         }
 
         /// <summary>
@@ -283,6 +413,34 @@ namespace Singular.Helpers
         }
 
         /// <summary>
+        ///  Check the aura count thats created by yourself by the name on specified unit
+        /// </summary>
+        /// <param name="aura"> The name of the aura in English. </param>
+        /// <param name="unit"> The unit to check auras for. </param>
+        /// <returns></returns>
+        public static bool HasMyAura(this WoWUnit unit, int id)
+        {
+            return HasMyAura(unit, id, 0);
+        }
+
+        /// <summary>
+        ///  Check the aura count thats created by yourself by the name on specified unit
+        /// </summary>
+        /// <param name="aura"> The name of the aura in English. </param>
+        /// <param name="unit"> The unit to check auras for. </param>
+        /// <param name="stacks"> The stack count of the aura to return true. </param>
+        /// <returns></returns>
+        public static bool HasMyAura(this WoWUnit unit, int id, int stacks)
+        {
+            return HasAura(unit, id, stacks, StyxWoW.Me);
+        }
+
+        private static bool HasAura(this WoWUnit unit, int id, int stacks, WoWUnit creator)
+        {
+            return unit.GetAllAuras().Any(a => a.SpellId == id && a.StackCount >= stacks && (creator == null || a.CreatorGuid == creator.Guid));
+        }
+
+        /// <summary>
         ///  Checks for the auras on a specified unit. Returns true if the unit has any aura in the auraNames list.
         /// </summary>
         /// <param name="unit"> The unit to check auras for. </param>
@@ -293,6 +451,14 @@ namespace Singular.Helpers
             var auras = unit.GetAllAuras();
             var hashes = new HashSet<string>(auraNames);
             return auras.Any(a => hashes.Contains(a.Name));
+        }
+
+
+        public static bool HasAnyAura(this WoWUnit unit, params int[] ids)
+        {
+            var auras = unit.GetAllAuras();
+            var hashes = new HashSet<int>(ids);
+            return auras.Any(a => hashes.Contains(a.SpellId));
         }
 
 
@@ -333,7 +499,7 @@ namespace Singular.Helpers
         {
             // need to compare millisecs even though seconds are provided.  otherwise see it as expired 999 ms early because
             // .. of loss of precision
-            return SpellManager.HasSpell(spell) && u.GetAuraTimeLeft(aura, myAura) <= TimeSpan.FromMilliseconds(secs * 1000);
+            return SpellManager.HasSpell(spell) && u.GetAuraTimeLeft(aura, myAura).TotalSeconds <= (double) secs;
         }
 
 
@@ -346,7 +512,7 @@ namespace Singular.Helpers
         /// <returns>true aura missing or less than 'secs' time left, otherwise false</returns>
         public static bool HasKnownAuraExpired(this WoWUnit u, string aura, int secs = 3, bool myAura = true)
         {
-            return u.GetAuraTimeLeft(aura, myAura).TotalSeconds < secs;
+            return u.GetAuraTimeLeft(aura, myAura).TotalSeconds < (double) secs;
         }
 
 
@@ -415,6 +581,11 @@ namespace Singular.Helpers
                 a.TryCancelAura();
         }
 
+        public static bool IsNeutral(this WoWUnit unit)
+        {
+            return unit.GetReactionTowards(StyxWoW.Me) == WoWUnitReaction.Neutral;
+        }
+
         /// <summary>
         /// Returns a list of resurrectable players in a 40 yard radius
         /// </summary>
@@ -452,14 +623,14 @@ namespace Singular.Helpers
 
                      );
 #else
-            return unit.Stunned 
-                || unit.Rooted 
+            return unit.Stunned
+                || unit.Rooted
                 || unit.Fleeing 
                 || unit.HasAuraWithEffect(
                         WoWApplyAuraType.ModConfuse, 
                         WoWApplyAuraType.ModCharm, 
                         WoWApplyAuraType.ModFear, 
-                        WoWApplyAuraType.ModDecreaseSpeed, 
+                        // WoWApplyAuraType.ModDecreaseSpeed, 
                         WoWApplyAuraType.ModPacify, 
                         WoWApplyAuraType.ModPacifySilence, 
                         WoWApplyAuraType.ModPossess, 
@@ -480,14 +651,52 @@ namespace Singular.Helpers
             return unit.Auras.Values.Any( a => a.Spell != null && a.Spell.SpellEffects.Any(se => hashes.Contains(se.AuraType)));
         }
 
+        /// <summary>
+        /// IsBoss() checks usually appear in a sequence testing same target repeatedly.  
+        /// Cache the values for a fast return in that circumstanc
+        /// </summary>
+        private static ulong _lastIsBossGuid = 0;
+        private static bool _lastIsBossResult = false;
+   
+        /// <summary>
+        /// checks if unit is in list of bosses. cache of prior check kept for faster return in 
+        /// instance behaviors which repeatedly test this as part of criteria for different
+        /// cooldown casts
+        /// </summary>
+        /// <param name="unit">unit to test if they are a known boss</param>
+        /// <returns>true: if boss</returns>
         public static bool IsBoss(this WoWUnit unit)
         {
-            return unit != null && (Lists.BossList.CurrentMapBosses.Contains(unit.Name) || Lists.BossList.BossIds.Contains(unit.Entry));
+            ulong guid = unit == null ? 0 : unit.Guid;
+            if ( guid == _lastIsBossGuid )
+                return _lastIsBossResult;
+
+            _lastIsBossGuid = guid;
+            _lastIsBossResult = unit != null && (Lists.BossList.CurrentMapBosses.Contains(unit.Name) || Lists.BossList.BossIds.Contains(unit.Entry));
+            if (!_lastIsBossResult)
+                _lastIsBossResult = IsTrainingDummy(unit);
+            return _lastIsBossResult;
         }
 
+        private const int BannerOfTheAlliance = 61573;
+        private const int BannerOfTheHorde = 61574;
+        
         public static bool IsTrainingDummy(this WoWUnit unit)
         {
-            return Lists.BossList.TrainingDummies.Contains(unit.Entry);
+            // return Lists.BossList.TrainingDummies.Contains(unit.Entry);
+            int bannerId = StyxWoW.Me.IsHorde ? BannerOfTheAlliance : BannerOfTheHorde;
+            return unit != null && unit.Level > 1 
+                && ((unit.CurrentHealth == 1 && unit.MaxHealth == 1) || unit.HasAura(bannerId));
+        }
+
+        /// <summary>
+        /// checks if unit is targeting you, your minions, a group member, or group pets
+        /// </summary>
+        /// <param name="u">unit</param>
+        /// <returns>true if targeting your guys, false if not</returns>
+        public static bool IsTargetingMyStuff(this WoWUnit u)
+        {
+            return u.IsTargetingMeOrPet || u.IsTargetingAnyMinion;
         }
 
         /// <summary>
@@ -497,21 +706,18 @@ namespace Singular.Helpers
         /// <returns>true if targeting your guys, false if not</returns>
         public static bool IsTargetingUs(this WoWUnit u)
         {
-            return u.IsTargetingMeOrPet
-                || u.IsTargetingAnyMinion
-                || Unit.GroupMemberInfos.Any(m => m.Guid == u.CurrentTargetGuid);
-
+            return u.IsTargetingMyStuff() || Unit.GroupMemberInfos.Any(m => m.Guid == u.CurrentTargetGuid);
         }
 
-        public static bool IsSensitiveDamage(this WoWUnit u, float range)
+        public static bool IsSensitiveDamage(this WoWUnit u,  int range = 0)
         {
-            if (u == StyxWoW.Me.CurrentTarget)
+            if (u.Guid == StyxWoW.Me.CurrentTargetGuid)
                 return false;
 
-            if (!u.Combat && !u.IsPlayer && u.IsNeutral)
+            if (!u.Combat && !u.IsPlayer && u.IsNeutral())
                 return true;
 
-            if (u.SpellDistance() > range)
+            if (range > 0 && u.SpellDistance() > range)
                 return false;
 
             return u.IsCrowdControlled();
@@ -602,11 +808,11 @@ namespace Singular.Helpers
             return me.GroupInfo.IsInParty || me.GroupInfo.IsInRaid;
         }
 
-        public static uint GetPredictedHealth(this WoWUnit unit, bool includeMyHeals = false)
+        public static uint LocalGetPredictedHealth(this WoWUnit unit, bool includeMyHeals = false)
         {
             // Reversing note: CGUnit_C::GetPredictedHeals
-            const int PredictedHealsCount = 0x1340;
-            const int PredictedHealsArray = 0x1344;
+            const int PredictedHealsCount = 0x1374;
+            const int PredictedHealsArray = 0x1378;
 
             Debug.Assert(unit != null);
             uint health = unit.CurrentHealth;
@@ -621,9 +827,9 @@ namespace Singular.Helpers
                 .Aggregate(health, (current, heal) => current + heal.HealAmount);
         }
 
-        public static float GetPredictedHealthPercent(this WoWUnit unit, bool includeMyHeals = false)
+        public static float LocalGetPredictedHealthPercent(this WoWUnit unit, bool includeMyHeals = false)
         {
-             return (float)unit.GetPredictedHealth(includeMyHeals) * 100 / unit.MaxHealth;
+             return (float)unit.LocalGetPredictedHealth(includeMyHeals) * 100 / unit.MaxHealth;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -675,10 +881,19 @@ namespace Singular.Helpers
             }
         }
 
-
-        internal static bool HasMyAura(string p)
+        public static IEnumerable<WoWUnit> MobsAttackingTank()
         {
-            throw new NotImplementedException();
+            return Unit.NearbyUnfriendlyUnits.Where(u => Group.Tanks.Any( t => t.IsAlive && t.Guid == u.CurrentTargetGuid));
+        }
+
+        public static WoWUnit LowestHealthMobAttackingTank()
+        {
+            return MobsAttackingTank().OrderBy(u => u.HealthPercent).FirstOrDefault();
+        }
+
+        public static WoWUnit HighestHealthMobAttackingTank()
+        {
+            return MobsAttackingTank().OrderByDescending(u => u.HealthPercent).FirstOrDefault();
         }
     }
 

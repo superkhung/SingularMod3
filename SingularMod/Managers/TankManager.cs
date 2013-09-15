@@ -50,7 +50,7 @@ namespace Singular.Managers
 
                 WoWUnit u = units[i].ToUnit();
 
-                if (u.IsFriendly || u.IsDead || u.IsPet || !u.Combat || u.IsCrowdControlled() || !u.Attackable || u.IsBoss)
+                if (u.IsFriendly || u.IsDead || u.IsPet || !u.Combat || u.IsCrowdControlled())
                 {
                     units.RemoveAt(i);
                     continue;

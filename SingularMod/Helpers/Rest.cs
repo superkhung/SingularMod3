@@ -54,63 +54,69 @@ namespace Singular.Helpers
 
                 // Self-heal if possible
                         new Decorator(
-                            ret => spellHeal != null && SpellManager.HasSpell(spellHeal) && SpellManager.CanCast( spellHeal, Me, false, false)
+                            ret => spellHeal != null && SpellManager.HasSpell(spellHeal) && Spell.CanCastHack(spellHeal, Me)
                                 && Me.GetPredictedHealthPercent(true) <= 85 && !Me.HasAura("Drink") && !Me.HasAura("Food"),
                             new PrioritySelector(
-                                Movement.CreateEnsureMovementStoppedBehavior(),
-                                new Action( r => { Logger.WriteDebug( "Rest Heal - {0} @ {1:F1}% and moving:{2}", spellHeal, Me.HealthPercent, Me.IsMoving ); return RunStatus.Failure; } ),
-                                Spell.Cast(spellHeal,
-                                    mov => true,
-                                    on => Me,
-                                    req => !Me.IsMoving,
-                                    cancel => Me.HealthPercent > 90)
+                                Movement.CreateEnsureMovementStoppedBehavior(reason: "to heal"),
+                                new Action(r => { Logger.WriteDebug("Rest Heal - {0} @ {1:F1}% Predict:{2:F1}% and moving:{3}, cancast:{4}", spellHeal, Me.HealthPercent, Me.GetPredictedHealthPercent(true), Me.IsMoving, Spell.CanCastHack(spellHeal, Me, skipWowCheck: false)); return RunStatus.Failure; }),
+                                new Sequence(
+                                    Spell.Cast(spellHeal,
+                                        mov => true,
+                                        on => Me,
+                                        req => true,
+                                        cancel => Me.HealthPercent > 90
+                                        ),
+                                    new Action( r => Logger.WriteDebug("Rest - After Heal Attempted: {0:F1}% Predicted: {1:F1}%", Me.HealthPercent, Me.GetPredictedHealthPercent(true)))
+                                    ),
+                                new Action( r => Logger.WriteDebug("Rest - After Heal Skipped: {0:F1}% Predicted: {1:F1}%", Me.HealthPercent, Me.GetPredictedHealthPercent(true)))
                                 )
                             ),
 
                 // Make sure we wait out res sickness. 
                         Helpers.Common.CreateWaitForRessSickness(),
-                       
+
                 // Cannibalize support goes before drinking/eating. changed to a Sequence with wait because Rest behaviors that had a 
                 // .. WaitForCast() before call to DefaultRest would prevent cancelling when health/mana reached
                         new Decorator(
                             ret => SingularSettings.Instance.UseRacials
-                                && (Me.GetPredictedHealthPercent(true) <= SingularSettings.Instance.MinHealth || (Me.PowerType == WoWPowerType.Mana && Me.ManaPercent <= SingularSettings.Instance.MinMana)) 
-                                && SpellManager.CanCast("Cannibalize") 
+                                && (Me.GetPredictedHealthPercent(true) <= SingularSettings.Instance.MinHealth || (Me.PowerType == WoWPowerType.Mana && Me.ManaPercent <= SingularSettings.Instance.MinMana))
+                                && Spell.CanCastHack("Cannibalize")
                                 && CorpseAround,
                             new Sequence(
-                                new DecoratorContinue( ret => Me.IsMoving, Movement.CreateEnsureMovementStoppedBehavior()),
-                                new Wait( 1, ret => !Me.IsMoving, new ActionAlwaysSucceed()),
-                                new Action(ret => Logger.Write( "Casting Cannibalize @ health:{0:F1}%{1}", Me.HealthPercent, (Me.PowerType != WoWPowerType.Mana) ? "" : string.Format( " mana:{0:F1}%", Me.ManaPercent ))),
+                                new DecoratorContinue(ret => Me.IsMoving, Movement.CreateEnsureMovementStoppedBehavior(reason: "to cannibalize")),
+                                new Wait(1, ret => !Me.IsMoving, new ActionAlwaysSucceed()),
+                                new Action(ret => Logger.Write("Casting Cannibalize @ health:{0:F1}%{1}", Me.HealthPercent, (Me.PowerType != WoWPowerType.Mana) ? "" : string.Format(" mana:{0:F1}%", Me.ManaPercent))),
                                 new Action(ret => SpellManager.Cast("Cannibalize")),
 
                                 // wait until Cannibalize in progress
                                 new WaitContinue(
-                                    1, 
+                                    1,
                                     ret => Me.CastingSpell != null && Me.CastingSpell.Name == "Cannibalize",
                                     new ActionAlwaysSucceed()
                                     ),
-                                // wait until cast or healing complete. use actual health percent here
+                // wait until cast or healing complete. use actual health percent here
                                 new WaitContinue(
-                                    10, 
-                                    ret => Me.CastingSpell == null 
-                                        || Me.CastingSpell.Name != "Cannibalize" 
+                                    10,
+                                    ret => Me.CastingSpell == null
+                                        || Me.CastingSpell.Name != "Cannibalize"
                                         || (Me.HealthPercent > 95 && (Me.PowerType != WoWPowerType.Mana || Me.ManaPercent > 95)),
                                     new ActionAlwaysSucceed()
                                     ),
-                                // show completion message and cancel cast if needed
-                                new Action( ret => {
+                // show completion message and cancel cast if needed
+                                new Action(ret =>
+                                {
                                     bool stillCasting = Me.CastingSpell != null && Me.CastingSpell.Name == "Cannibalize";
-                                    Logger.WriteFile( "{0} @ health:{1:F1}%{2}", 
+                                    Logger.WriteFile("{0} @ health:{1:F1}%{2}",
                                         stillCasting ? "/cancel Cannibalize" : "Cannibalize ended",
-                                        Me.HealthPercent, 
-                                        (Me.PowerType != WoWPowerType.Mana) ? "" : string.Format( " mana:{0:F1}%", Me.ManaPercent )
+                                        Me.HealthPercent,
+                                        (Me.PowerType != WoWPowerType.Mana) ? "" : string.Format(" mana:{0:F1}%", Me.ManaPercent)
                                         );
 
-                                    if (stillCasting )
+                                    if (stillCasting)
                                     {
                                         SpellManager.StopCasting();
                                     }
-                                    })
+                                })
                                 )
                             ),
 
@@ -122,10 +128,10 @@ namespace Singular.Helpers
 
                 // Check if we're allowed to eat (and make sure we have some food. Don't bother going further if we have none.
                         new Decorator(
-                            ret => !Me.IsSwimming && Me.GetPredictedHealthPercent(true) <= SingularSettings.Instance.MinHealth 
+                            ret => !Me.IsSwimming && Me.GetPredictedHealthPercent(true) <= SingularSettings.Instance.MinHealth
                                 && !Me.HasAura("Food") && Consumable.GetBestFood(false) != null,
                             new PrioritySelector(
-                                Movement.CreateEnsureMovementStoppedBehavior(),
+                                Movement.CreateEnsureMovementStoppedBehavior(reason: "to eat"),
                                 new Sequence(
                                     new Action(
                                         ret =>
@@ -139,10 +145,10 @@ namespace Singular.Helpers
 
                 // Make sure we're a class with mana, if not, just ignore drinking all together! Other than that... same for food.
                         new Decorator(
-                            ret => !Me.IsSwimming && (Me.PowerType == WoWPowerType.Mana || Me.Class == WoWClass.Druid) 
+                            ret => !Me.IsSwimming && (Me.PowerType == WoWPowerType.Mana || Me.Class == WoWClass.Druid)
                                 && Me.ManaPercent <= SingularSettings.Instance.MinMana && !Me.HasAura("Drink") && Consumable.GetBestDrink(false) != null,
                             new PrioritySelector(
-                                Movement.CreateEnsureMovementStoppedBehavior(),
+                                Movement.CreateEnsureMovementStoppedBehavior(reason: "to drink"),
                                 new Sequence(
                                     new Action(ret =>
                                         {
@@ -155,7 +161,7 @@ namespace Singular.Helpers
 
                 // This is to ensure we STAY SEATED while eating/drinking. No reason for us to get up before we have to.
                         new Decorator(
-                            ret => (Me.HasAura("Food") && Me.HealthPercent < 95) 
+                            ret => (Me.HasAura("Food") && Me.HealthPercent < 95)
                                 || (Me.HasAura("Drink") && Me.PowerType == WoWPowerType.Mana && Me.ManaPercent < 95),
                             new ActionAlwaysSucceed()
                             ),
@@ -168,22 +174,29 @@ namespace Singular.Helpers
                                 new Decorator(
                                     ret => Me.IsMoving,
                                     new PrioritySelector(
-                                        new Throttle( 5, new Action(ret => Logger.Write("Still moving... waiting until Bot stops"))),
+                                        new Throttle(5, new Action(ret => Logger.Write("Still moving... waiting until Bot stops"))),
+                                        new ActionAlwaysSucceed()
+                                        )
+                                    ),
+                                new Decorator(
+                                    req => Me.IsSwimming,
+                                    new PrioritySelector(
+                                        new Throttle(15, new Action(ret => Logger.Write("Swimming. Waiting to recover our health/mana back"))),
                                         new ActionAlwaysSucceed()
                                         )
                                     ),
                                 new PrioritySelector(
-                                    new Throttle(5, new Action(ret => Logger.Write("We have no food/drink. Waiting to recover our health/mana back"))),
+                                    new Throttle(15, new Action(ret => Logger.Write("We have no food/drink. Waiting to recover our health/mana back"))),
                                     new ActionAlwaysSucceed()
                                     )
                                 )
                             ),
 
                 // rez anyone near us if appropriate
-                        new Decorator( ret => spellRez != null, Spell.Resurrect( spellRez )),
+                        new Decorator(ret => spellRez != null, Spell.Resurrect(spellRez)),
 
                 // hack:  some bots not calling PreCombatBuffBehavior, so force the call if we are about done resting
-                        // SingularRoutine.Instance.PreCombatBuffBehavior,
+                // SingularRoutine.Instance.PreCombatBuffBehavior,
 
                         Movement.CreateWorgenDarkFlightBehavior()
                         )

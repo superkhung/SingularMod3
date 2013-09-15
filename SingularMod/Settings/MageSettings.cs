@@ -12,10 +12,19 @@ using System.Xml.Serialization;
 
 namespace Singular.Settings
 {
+    public enum MageArmor
+    {
+        None = 0,
+        Auto = 1,
+        Frost,
+        Mage,
+        Molten
+    }
+
     internal class MageSettings : Styx.Helpers.Settings
     {
         public MageSettings()
-            : base(Path.Combine(SingularSettings.SettingsPath, "Mage.xml"))
+            : base(Path.Combine(SingularSettings.SingularSettingsPath, "Mage.xml"))
         {
             // bit of a hack -- SavedToFile setting tracks if we have ever saved
             // .. these settings.  this is needed because we can't use the DefaultValue
@@ -23,16 +32,6 @@ namespace Singular.Settings
             if (!SavedToFile)
             {
                 SavedToFile = true;
-                SpellStealList = new uint[]
-                { 
-                    // list (possibly outdated at:) http://www.wowwiki.com/List_of_magic_effects
-                    1022,   //  Paladin - Hand of Protection
-                    1044,   //  Paladin - Hand of Freedom
-                    974,    //  Shaman - Earth Shield
-                    2825,   //  Shaman - Bloodlust
-                    32182,  //  Shaman - Heroism
-                    80353   //  Mage - Time Warp
-                };
             }
         }
 
@@ -59,22 +58,20 @@ namespace Singular.Settings
         [Description("Time Warp when appropriate (never when movement disabled)")]
         public bool UseTimeWarp { get; set; }
 
-        #endregion
-
-        #region Category: Spellsteal
+        [Setting]
+        [DefaultValue(MageArmor.Auto)]
+        [Category("Common")]
+        [DisplayName("Armor Buff")]
+        [Description("Which Armor Buff to cast (None: user controlled, Auto: best choice)")]
+        public MageArmor Armor { get; set; }
 
         [Setting]
-        [DefaultValue(WatchTargetForCast.Current)]
-        [Category("Spellsteal")]
-        [DisplayName("Which Targets")]
-        [Description("None: disabled, Current: our target only, Other: enemies in range we are facing")]
-        public WatchTargetForCast SpellStealTarget { get; set; }
+        [DefaultValue(true)]
+        [Category("Common")]
+        [DisplayName("Use Slow Fall")]
+        [Description("True: Cast Slow Fall if falling")]
+        public bool UseSlowFall { get; set; }
 
-        [Setting]
-        [Category("Spellsteal")]
-        [DisplayName("Spell List")]
-        [Description("True: check enemies for spell in list to steal")]
-        public uint[] SpellStealList { get; set; }
 
         #endregion
 

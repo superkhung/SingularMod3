@@ -51,35 +51,33 @@ namespace Singular.Helpers
         /// <returns></returns>
         public static Composite UseEquippedItem(uint slot)
         {
-            return new PrioritySelector(
-                ctx => StyxWoW.Me.Inventory.GetItemBySlot(slot),
-                new Decorator(
-                    ctx => ctx != null && CanUseEquippedItem((WoWItem)ctx),
-                    new Action(ctx => UseItem((WoWItem)ctx))));
+            return new Throttle( TimeSpan.FromMilliseconds(250),
+                new PrioritySelector(
+                    ctx => StyxWoW.Me.Inventory.GetItemBySlot(slot),
+                    new Decorator(
+                        ctx => ctx != null && CanUseEquippedItem((WoWItem)ctx),
+                        new Action(ctx => UseItem((WoWItem)ctx))
+                        )
+                    )
+                );
 
         }
 
         public static Composite UseEquippedTrinket(TrinketUsage usage)
         {
-            return new PrioritySelector(
-                new Decorator(
-                    ret => usage == SingularSettings.Instance.Trinket1Usage,
-                    new PrioritySelector(
-                        ctx => StyxWoW.Me.Inventory.GetItemBySlot((uint) WoWInventorySlot.Trinket1 ),
-                        new Decorator( 
-                            ctx => ctx != null && CanUseEquippedItem((WoWItem)ctx),
-                            new Action(ctx => UseItem((WoWItem)ctx))
-                            )
-                        )
-                    ),
-                new Decorator(
-                    ret => usage == SingularSettings.Instance.Trinket2Usage,
-                    new PrioritySelector(
-                        ctx => StyxWoW.Me.Inventory.GetItemBySlot((uint) WoWInventorySlot.Trinket2 ),
-                        new Decorator( 
-                            ctx => ctx != null && CanUseEquippedItem((WoWItem)ctx),
-                            new Action(ctx => UseItem((WoWItem)ctx))
-                            )
+            return new Throttle( TimeSpan.FromMilliseconds(250),
+                new PrioritySelector(
+                    new Decorator(
+                        ret => usage == SingularSettings.Instance.Trinket1Usage,
+                        UseEquippedItem( (uint) WoWInventorySlot.Trinket1 )
+                        ),
+                    new Decorator(
+                        ret => usage == SingularSettings.Instance.Trinket2Usage,
+                        UseEquippedItem( (uint) WoWInventorySlot.Trinket2 )
+                        ),
+                    new Decorator(
+                        ret => usage == SingularSettings.Instance.GloveUsage,
+                        UseEquippedItem( (uint) WoWInventorySlot.Hands )
                         )
                     )
                 );
@@ -171,7 +169,7 @@ namespace Singular.Helpers
                         new Decorator(
                             ret => ret != null,
                             new Sequence(
-                                new Action(ret => Logger.Write(String.Format("Using {0}", ((WoWItem)ret).Name))),
+                                new Action(ret => Logger.Write(String.Format("Using {0} @ {1:F1}% Health", ((WoWItem)ret).Name, StyxWoW.Me.HealthPercent ))),
                                 new Action(ret => ((WoWItem)ret).UseContainerItem()),
                                 Helpers.Common.CreateWaitForLagDuration()))
                         )),
@@ -182,80 +180,27 @@ namespace Singular.Helpers
                         new Decorator(
                             ret => ret != null,
                             new Sequence(
-                                new Action(ret => Logger.Write(String.Format("Using {0}", ((WoWItem)ret).Name))),
+                                new Action(ret => Logger.Write(String.Format("Using {0} @ {1:F1}% Mana", ((WoWItem)ret).Name, StyxWoW.Me.ManaPercent ))),
                                 new Action(ret => ((WoWItem)ret).UseContainerItem()),
                                 Helpers.Common.CreateWaitForLagDuration()))))
                 );
         }
 
+        /// <summary>
+        /// use Alchemist's Flask if no flask buff active. do over optimize since this is a precombatbuff behavior
+        /// </summary>
+        /// <returns></returns>
 
-        public static bool UseTrinket(bool firstSlot)
-        {
-            TrinketUsage usage = firstSlot ? SingularSettings.Instance.Trinket1Usage : SingularSettings.Instance.Trinket2Usage;
-
-            // If we're not going to use it, don't bother going any further. Save some performance here.
-            if (usage == TrinketUsage.Never)
-            {
-                return false;
-            }
-
-            WoWItem item = firstSlot ? StyxWoW.Me.Inventory.Equipped.Trinket1 : StyxWoW.Me.Inventory.Equipped.Trinket2;
-            //int percent = firstSlot ? SingularSettings.Instance.FirstTrinketUseAtPercent : SingularSettings.Instance.SecondTrinketUseAtPercent;
-
-            if (item == null)
-            {
-                return false;
-            }
-
-            if (!CanUseEquippedItem(item))
-                return false;
-
-            bool useIt = false;
-            switch (usage)
-            {
-                case TrinketUsage.OnCooldown:
-                    // We know its off cooldown... so just use it :P
-                    useIt = true;
-                    break;
-                case TrinketUsage.OnCooldownInCombat:
-                    if (StyxWoW.Me.Combat)
-                    {
-                        useIt = true;
-                    }
-                    break;
-                case TrinketUsage.LowPower:
-                    // We use the PowerPercent here, since it applies to ALL types of power. (Runic, Mana, Rage, Energy, Focus)
-                    if (StyxWoW.Me.PowerPercent < SingularSettings.Instance.PotionMana )
-                    {
-                        useIt = true;
-                    }
-                    break;
-                case TrinketUsage.LowHealth:
-                    if (StyxWoW.Me.HealthPercent < SingularSettings.Instance.PotionHealth )
-                    {
-                        useIt = true;
-                    }
-                    break;
-            }
-
-            if (useIt)
-            {
-                Logger.Write("Popping trinket " + item.Name);
-                item.Use();
-                return true;
-            }
-            return false;
-        }
         public static Composite CreateUseAlchemyBuffsBehavior()
         {
             return new PrioritySelector(
                 new Decorator(
-                    ret =>
-                    SingularSettings.Instance.UseAlchemyFlasks && StyxWoW.Me.GetSkill(SkillLine.Alchemy).CurrentValue >= 400 &&
-                    !StyxWoW.Me.Auras.Any(aura => aura.Key.StartsWith("Enhanced ") || aura.Key.StartsWith("Flask of ")), // don't try to use the flask if we already have or if we're using a better one
+                    ret => SingularSettings.Instance.UseAlchemyFlasks 
+                        && StyxWoW.Me.GetSkill(SkillLine.Alchemy) != null && StyxWoW.Me.GetSkill(SkillLine.Alchemy).CurrentValue >= 400 
+                        && !StyxWoW.Me.Auras.Any(aura => aura.Key.StartsWith("Enhanced ") || aura.Key.StartsWith("Flask of ")), // don't try to use the flask if we already have or if we're using a better one
                     new PrioritySelector(
-                        ctx => StyxWoW.Me.CarriedItems.FirstOrDefault(i => i.Entry == 58149) ?? StyxWoW.Me.CarriedItems.FirstOrDefault(i => i.Entry == 47499),
-                // Flask of Enhancement / Flask of the North
+                        ctx => StyxWoW.Me.CarriedItems.FirstOrDefault(i => i.Entry == 75525),
+                        // Alchemist's Flask
                         new Decorator(
                             ret => ret != null,
                             new Sequence(
@@ -300,36 +245,37 @@ namespace Singular.Helpers
 
         public static void WriteCharacterGearAndSetupInfo()
         {
-            if (GlobalSettings.Instance.LogLevel < LogLevel.Normal)
-                return;
-
-            uint totalItemLevel;
-            SecondaryStats ss;          //create within frame (does series of LUA calls)
-
-            using (StyxWoW.Memory.AcquireFrame())
+            Logger.WriteFile("");
+            if (SingularSettings.Debug)
             {
-                totalItemLevel = CalcTotalGearScore();
-                ss = new SecondaryStats();
-            }
+                uint totalItemLevel;
+                SecondaryStats ss;          //create within frame (does series of LUA calls)
 
-            Logger.WriteFile("");
-            Logger.WriteFile("Equipped Total Item Level  : {0}", totalItemLevel);
-            Logger.WriteFile("Equipped Average Item Level: {0}", totalItemLevel / 16);
-            Logger.WriteFile("");
-            Logger.WriteFile("Health:      {0}", Me.MaxHealth);
-            Logger.WriteFile("Agility:     {0}", Me.Agility);
-            Logger.WriteFile("Intellect:   {0}", Me.Intellect);
-            Logger.WriteFile("Spirit:      {0}", Me.Spirit);
-            Logger.WriteFile("");
-            Logger.WriteFile("Hit(M/R):    {0}/{1}", ss.MeleeHit, ss.SpellHit);
-            Logger.WriteFile("Expertise:   {0}", ss.Expertise);
-            Logger.WriteFile("Mastery:     {0}", (int) ss.Mastery);
-            Logger.WriteFile("Crit:        {0:F2}", ss.Crit);
-            Logger.WriteFile("Haste(M/R):  {0}/{1}", ss.MeleeHaste, ss.SpellHaste);
-            Logger.WriteFile("SpellPen:    {0}", ss.SpellPen);
-            Logger.WriteFile("PvP Resil:   {0}", ss.Resilience);
-            Logger.WriteFile("PvP Power:   {0}", ss.PvpPower);
-            Logger.WriteFile("");
+                using (StyxWoW.Memory.AcquireFrame())
+                {
+                    totalItemLevel = CalcTotalGearScore();
+                    ss = new SecondaryStats();
+                }
+
+                Logger.WriteFile("Equipped Total Item Level  : {0}", totalItemLevel);
+                Logger.WriteFile("Equipped Average Item Level: {0}", totalItemLevel / 16);
+                Logger.WriteFile("");
+                Logger.WriteFile("Health:      {0}", Me.MaxHealth);
+                Logger.WriteFile("Strength:    {0}", Me.Strength);
+                Logger.WriteFile("Agility:     {0}", Me.Agility);
+                Logger.WriteFile("Intellect:   {0}", Me.Intellect);
+                Logger.WriteFile("Spirit:      {0}", Me.Spirit);
+                Logger.WriteFile("");
+                Logger.WriteFile("Hit(M/R):    {0}/{1}", ss.MeleeHit, ss.SpellHit);
+                Logger.WriteFile("Expertise:   {0}", ss.Expertise);
+                Logger.WriteFile("Mastery:     {0}", (int)ss.Mastery);
+                Logger.WriteFile("Crit:        {0:F2}", ss.Crit);
+                Logger.WriteFile("Haste(M/R):  {0}/{1}", ss.MeleeHaste, ss.SpellHaste);
+                Logger.WriteFile("SpellPen:    {0}", ss.SpellPen);
+                Logger.WriteFile("PvP Resil:   {0}", ss.Resilience);
+                Logger.WriteFile("PvP Power:   {0}", ss.PvpPower);
+                Logger.WriteFile("");
+            }
 
             Logger.WriteFile("Talents Selected: {0}", Singular.Managers.TalentManager.Talents.Count(t => t.Selected));
             foreach (var t in Singular.Managers.TalentManager.Talents)
@@ -337,7 +283,7 @@ namespace Singular.Helpers
                 if (!t.Selected)
                     continue;
 
-                string talent = "";
+                string talent = "unknown";
                 switch (Me.Class)
                 {
                     case WoWClass.DeathKnight:
@@ -416,20 +362,20 @@ namespace Singular.Helpers
                 WoWItem item = Me.Inventory.Equipped.GetItemBySlot(slot);
                 if (item != null && IsItemImportantToGearScore(item))
                 {
-                    uint itemLvl = GearScore(item);
+                    uint itemLvl = GetGearScore(item);
                     totalItemLevel += itemLvl;
                     // Logger.WriteFile("  good:  item[{0}]: {1}  [{2}]", slot, itemLvl, item.Name);
                 }
             }
 
             // double main hand score if have a 2H equipped
-            if (Me.Inventory.Equipped.MainHand != null && Me.Inventory.Equipped.MainHand.ItemInfo.InventoryType == InventoryType.TwoHandWeapon)
-                totalItemLevel += GearScore(Me.Inventory.Equipped.MainHand);
+            if (GetInventoryType(Me.Inventory.Equipped.MainHand) == InventoryType.TwoHandWeapon)
+                totalItemLevel += GetGearScore(Me.Inventory.Equipped.MainHand);
 
             return totalItemLevel;
         }
 
-        private static uint GearScore(WoWItem item)
+        private static uint GetGearScore(WoWItem item)
         {
             uint iLvl = 0;
             try
@@ -439,10 +385,26 @@ namespace Singular.Helpers
             }
             catch
             {
-                ;
+                Logger.WriteDebug("GearScore: ItemInfo not available for [0] #{1}", item.Name, item.Entry );
             }
 
             return iLvl;
+        }
+
+        private static InventoryType GetInventoryType(WoWItem item)
+        {
+            InventoryType typ = Styx.InventoryType.None;
+            try
+            {
+                if (item != null)
+                    typ = item.ItemInfo.InventoryType;
+            }
+            catch
+            {
+                Logger.WriteDebug("InventoryType: ItemInfo not available for [0] #{1}", item.Name, item.Entry);
+            }
+
+            return typ;
         }
 
         private static bool IsItemImportantToGearScore(WoWItem item)
@@ -532,7 +494,7 @@ namespace Singular.Helpers
         {
             return new Decorator( 
 
-                ret => SingularSettings.Instance.UseBandages && Me.HealthPercent < 95 && SpellManager.HasSpell( "First Aid") && !Me.HasAura( "Recently Bandaged") && !Me.ActiveAuras.Any( a => a.Value.IsHarmful ),
+                ret => SingularSettings.Instance.UseBandages && Me.GetPredictedHealthPercent(true) < 95 && SpellManager.HasSpell( "First Aid") && !Me.HasAura( "Recently Bandaged") && !Me.ActiveAuras.Any( a => a.Value.IsHarmful ),
 
                 new PrioritySelector(
 

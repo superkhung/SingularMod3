@@ -1,4 +1,5 @@
-﻿#define IGNORE_TARGETING_UNLESS_SEARCHING_FOR_NEW_TARGET
+﻿#define ALWAYS_SWITCH_TO_BOTPOI
+#define IGNORE_TARGETING_UNLESS_SEARCHING_FOR_NEW_TARGET
 #define BOT_FIRSTUNIT_GETS_PRIORITY
 
 using System.Drawing;
@@ -15,6 +16,7 @@ using Styx.TreeSharp;
 using Singular.Managers;
 using Action = Styx.TreeSharp.Action;
 using Styx.Helpers;
+using System;
 
 namespace Singular.Helpers
 {
@@ -23,6 +25,8 @@ namespace Singular.Helpers
         private static Color targetColor = Color.LightCoral;
 
         private static LocalPlayer Me { get { return StyxWoW.Me; } }
+
+        private static DateTime _timeNextInvalidTargetMessage = DateTime.MinValue;
 
 #if WE_NEED_TO_REMOVE_FRIENDLY_CURRENT_TARGETS
         // following will work, but there is a larger issue of responsibility.  DungeonBuddy needs for Singular
@@ -65,31 +69,6 @@ namespace Singular.Helpers
                     ret => !SingularSettings.DisableAllTargeting,
                     new PrioritySelector(
 
-#region Tank Targeting
-
-                        new Decorator(
-                            // DisableTankTargeting is a user-setting. NeedTankTargeting is an internal one. Make sure both are turned on.
-                            ret => !SingularSettings.Instance.DisableTankTargetSwitching && Group.MeIsTank &&
-                                   TankManager.TargetingTimer.IsFinished && StyxWoW.Me.Combat && TankManager.Instance.FirstUnit != null &&
-                                   (StyxWoW.Me.CurrentTarget == null || StyxWoW.Me.CurrentTarget != TankManager.Instance.FirstUnit),
-                            new Sequence(
-                                // pending spells like mage blizard cause targeting to fail.
-                                new DecoratorContinue(ctx => StyxWoW.Me.CurrentPendingCursorSpell != null,
-                                    new Action(ctx => Lua.DoString("SpellStopTargeting()"))
-                                    ),
-                                new Action(
-                                    ret =>
-                                    {
-                                        Logger.WriteDebug("EnsureTarget: Targeting first unit of TankTargeting");
-                                        TankManager.Instance.FirstUnit.Target();
-                                    }),
-                                Helpers.Common.CreateWaitForLagDuration(),
-                                new Action(ret => TankManager.TargetingTimer.Reset())
-                                )
-                            ),
-
-#endregion
-
 #region Switch from Current Target if a more important one exists!
 
                         new PrioritySelector(
@@ -98,39 +77,30 @@ namespace Singular.Helpers
 
                             ctx => 
                             {
-                                // No target switching for tanks. They check for their own stuff above.
-                                if (Group.MeIsTank && !SingularSettings.Instance.DisableTankTargetSwitching)
-                                    return null;
-
-                                // Go below if current target is null or dead. We have other checks to deal with that
-                                if (StyxWoW.Me.CurrentTarget == null || StyxWoW.Me.CurrentTarget.IsDead)
-                                    return null;
-
-                                // check if current target is owned by a player
-                                if (StyxWoW.Me.CurrentTarget.OwnedByRoot != null )
+#region Tank Targeting
+                                // Handle tank targeting - only if in Combat, otherwise we'll choose based upon Targeting list
+                                if (!SingularSettings.Instance.DisableTankTargetSwitching && Group.MeIsTank && StyxWoW.Me.Combat && TankManager.Instance.FirstUnit != null)
                                 {
-                                    if (StyxWoW.Me.CurrentTarget.OwnedByRoot.IsPlayer)
+                                    if ( Me.CurrentTarget != TankManager.Instance.FirstUnit)
                                     {
-                                        Logger.Write(targetColor, "Current target owned by a player.  Switching to " + StyxWoW.Me.CurrentTarget.OwnedByRoot.SafeName() + "!");
-                                        return StyxWoW.Me.CurrentTarget.OwnedByRoot;
+                                        if ( TankManager.TargetingTimer.IsFinished )
+                                        {
+                                            Logger.Write( targetColor, "TankTarget: switching to first unit of TankTargeting");
+                                            return TankManager.Instance.FirstUnit;
+                                        }
+
+                                        if ( !Unit.ValidUnit( Me.CurrentTarget, showReason:false) )
+                                        {
+                                            Logger.Write( targetColor, "TankTarget: CurrentTarget invalid, switching to first unit of TankTargeting");
+                                            return TankManager.Instance.FirstUnit;
+                                        }
                                     }
+
+                                    return Me.CurrentTarget;   // pass our currenttarget to skip setting or switching
                                 }
+#endregion
 
-                                // check if current target is summoned by a player
-                                if (StyxWoW.Me.CurrentTarget.SummonedByUnit != null)
-                                {
-                                    WoWUnit newTarget = StyxWoW.Me.CurrentTarget;
-                                    do {
-                                        newTarget = newTarget.SummonedByUnit;
-                                    } while (newTarget.SummonedByUnit != null);
-
-                                    if (newTarget.IsPlayer )
-                                    {
-                                        Logger.Write(targetColor, "Current target summoned by a player.  Switching to " + newTarget.SafeName() + "!");
-                                        return newTarget;
-                                    }
-                                }
-
+#if ALWAYS_SWITCH_TO_BOTPOI
                                 // Check botpoi (our top priority.)  we switch to BotPoi if a kill type exists and not blacklisted
                                 // .. if blacklisted, clear the poi to give bot a chance to do something smarter
                                 // .. if we are already fighting it, we keep fighting it, end of story
@@ -138,26 +108,56 @@ namespace Singular.Helpers
                                 if (BotPoi.Current.Type == PoiType.Kill)
                                 {
                                     unit = BotPoi.Current.AsObject.ToUnit();
-                                    if (unit != null && unit.IsAlive && !unit.IsMe)
+                                    if (Unit.ValidUnit(unit, showReason: true ))
                                     {
-                                        if (Blacklist.Contains(unit.Guid, BlacklistFlags.Combat))
-                                        {
-                                            Logger.Write(targetColor, "BotPOI " + unit.SafeName() + " is blacklisted -- clearing POI!");
-                                            BotPoi.Clear("Blacklisted mob");
-
-                                            if (unit == Me.CurrentTarget && (Me.CurrentTarget.Combat && Me.CurrentTarget.IsTargetingMeOrPet))
-                                                return unit;
-
-                                            Logger.Write(targetColor, "Not in combat with blacklisted BotPOI " + unit.SafeName() + " so picking new target!");
-                                            return null;
-                                        }
-
-                                        if (StyxWoW.Me.CurrentTargetGuid != unit.Guid )
-                                            Logger.Write(targetColor, "Current target is not BotPOI.  Switching to " + unit.SafeName() + "!");
+                                        if (StyxWoW.Me.CurrentTargetGuid != unit.Guid)
+                                            Logger.Write(targetColor, "Switching to BotPoi: " + unit.SafeName() + "!");
 
                                         return unit;
                                     }
+
+                                    // Logger.Write(targetColor, "BotPOI " + unit.SafeName() + " not valid --- clearing");
+                                    BotPoi.Clear("Singular detected invalid mob as BotPoi");
                                 }
+#endif
+                                // Go below if current target is null or dead. We have other checks to deal with that
+                                if (StyxWoW.Me.CurrentTarget == null || StyxWoW.Me.CurrentTarget.IsDead)
+                                    return null;
+
+                                // target not aggroed yet or out of range? check for adds in melee pounding us
+                                if (!Me.IsInGroup() && Me.Combat && ((!StyxWoW.Me.CurrentTarget.Combat && !StyxWoW.Me.CurrentTarget.Aggro && !StyxWoW.Me.CurrentTarget.PetAggro) || StyxWoW.Me.SpellDistance() > 30 || !StyxWoW.Me.CurrentTarget.InLineOfSpellSight))
+                                {
+                                    // Look for agrroed mobs next. prioritize by IsPlayer, Relative Distance, then Health
+                                    var target = ObjectManager.GetObjectsOfType<WoWUnit>(false, false)
+                                        .Where(
+                                            p => p.SpellDistance() < 10
+                                            && Unit.ValidUnit(p)
+                                            && (p.Aggro || p.PetAggro)
+                                            && p.InLineOfSpellSight 
+                                            )
+                                        // .OrderBy(u => CalcDistancePriority(u)).ThenBy(u => u.HealthPercent)
+                                        .OrderBy(u => u.HealthPercent)
+                                        .FirstOrDefault();
+
+                                    if (target != null && target.Guid != Me.CurrentTargetGuid)
+                                    {
+                                        // Return the closest one to us
+                                        Logger.Write(targetColor, "Switching to aggroed mob pounding on me " + target.SafeName() + "!");
+                                        return target;
+                                    }
+                                }
+
+                                // check if current target is owned by a player
+                                WoWUnit pOwner = Unit.GetPlayerParent(Me.CurrentTarget);
+                                if (pOwner != null && Unit.ValidUnit(pOwner) && !Blacklist.Contains(pOwner, BlacklistFlags.Combat))
+                                {
+                                    Logger.Write(targetColor, "Current target owned by a player.  Switching to " + pOwner.SafeName() + "!");
+                                    if (BotPoi.Current.Type == PoiType.Kill && BotPoi.Current.Guid == Me.CurrentTarget.Guid)
+                                        BotPoi.Clear(string.Format("Singular detected {0} as Player Owned Pet", Me.CurrentTarget.SafeName()));
+
+                                    return pOwner;
+                                }
+
 
                                 // no valid BotPoi, so let's check Targeting.FirstUnit which is Bots #1 choice
 #if IGNORE_TARGETING_UNLESS_SEARCHING_FOR_NEW_TARGET
@@ -190,15 +190,16 @@ namespace Singular.Helpers
                                     }
                                 }
 #endif
+                                // at this point, just check its okay to kill currenttarget
                                 if (Blacklist.Contains(StyxWoW.Me.CurrentTargetGuid, BlacklistFlags.Combat))
                                 {
                                     if (Me.CurrentTarget.Combat && Me.CurrentTarget.IsTargetingMeOrPet)
                                     {
-                                        Logger.Write(targetColor, "Current target " + StyxWoW.Me.CurrentTarget.SafeName() + " blacklisted and Bot has no other targets!  Clearing target and hoping Bot wakes up!");
+                                        Logger.Write(targetColor, "Current target " + StyxWoW.Me.CurrentTarget.SafeName() + " blacklisted and Bot has no other targets!  Fighting this one and hoping Bot wakes up if its Evade bugged!");
                                         return Me.CurrentTarget;
                                     }
 
-                                    Logger.Write(targetColor, "CurrentTarget blacklisted and not in combat with " + Me.CurrentTarget.SafeName() + " so clearing target!");
+                                    Logger.Write(targetColor, "CurrentTarget " + Me.CurrentTarget.SafeName() + " blacklisted and not in combat with so clearing target!");
                                     Me.ClearTarget();
                                     return null;
                                 }
@@ -210,28 +211,35 @@ namespace Singular.Helpers
                                 // at this point, stick with it if in Targetlist
                                 if (Targeting.Instance.TargetList.Contains(Me.CurrentTarget))
                                 {
-                                    Logger.WriteDebug("EnsureTarget: target is in TargetList, continuing...");
+                                    Logger.WriteDebug( targetColor, "EnsureTarget: failed validation but is in TargetList, continuing...");
                                     return Me.CurrentTarget;
                                 }
 
                                 // otherwise, let's get a new one
-                                Logger.WriteDebug("EnsureTarget: invalid target, so forcing selection of a new one");
+                                Logger.WriteDebug( targetColor, "EnsureTarget: invalid target, so forcing selection of a new one");
                                 return null;
                             },
 
 #endregion
 
-#region Change targets if better target was found
+#region Target was selected -- change target if needed, or do nothing if already current target
 
                             new Decorator(
-                                ret => ret != null && ((WoWUnit)ret).Guid != StyxWoW.Me.CurrentTargetGuid,
+                                ret => ret != null,
                                 new Sequence(
-                                    new DecoratorContinue(
-                                        ret => StyxWoW.Me.CurrentPendingCursorSpell != null,
-                                        new Action(ctx => Lua.DoString("SpellStopTargeting()"))
+                                    CreateClearPendingCursorSpell(RunStatus.Success),
+                                    new Decorator(
+                                        req => ((WoWUnit)req).Guid != StyxWoW.Me.CurrentTargetGuid,
+                                        new Sequence(
+                                            // new Action(ret => Logger.Write( targetColor, "EnsureTarget: switching to target {0}", ((WoWUnit)ret).SafeName())),
+                                            new Action(ret => ((WoWUnit)ret).Target()),
+                                            new WaitContinue( 2, ret => StyxWoW.Me.CurrentTarget != null && StyxWoW.Me.CurrentTarget == (WoWUnit)ret, new ActionAlwaysSucceed()),
+                                            new Action(ret => TankManager.TargetingTimer.Reset())   // cheaper to just reset than to check if we need Tank Targeting
+                                            )
                                         ),
-                                    new Action(ret => ((WoWUnit)ret).Target()),
-                                    new WaitContinue( 2, ret => StyxWoW.Me.CurrentTarget != null && StyxWoW.Me.CurrentTarget == (WoWUnit)ret, new ActionAlwaysSucceed())
+
+                                    // fall through to spell priority at this point as we have our target and its valid
+                                    new ActionAlwaysFail()
                                     )
                                 ),
 
@@ -242,7 +250,7 @@ namespace Singular.Helpers
 #region Target Invalid (none or dead) - Find a New one if possible
 
                             new Decorator(
-                                ret => StyxWoW.Me.CurrentTarget == null || StyxWoW.Me.CurrentTarget.IsDead || !Unit.ValidUnit(Me.CurrentTarget),
+                                ret => ret == null,
                                 new PrioritySelector(
                                     ctx =>
                                     {
@@ -256,23 +264,23 @@ namespace Singular.Helpers
                                         }
 
                                         // if we have BotPoi then try it
-                                        if (BotPoi.Current.Type == PoiType.Kill)
+                                        if (SingularRoutine.CurrentWoWContext != WoWContext.Normal && BotPoi.Current.Type == PoiType.Kill)
                                         {
                                             var unit = BotPoi.Current.AsObject as WoWUnit;
                                             if (unit == null)
                                             {
                                                 Logger.Write(targetColor, "Current Kill POI invalid. Clearing POI!");
-                                                BotPoi.Clear("Unit is null");
+                                                BotPoi.Clear("Singular detected null POI");
                                             }
                                             else if (!unit.IsAlive)
                                             {
                                                 Logger.Write(targetColor, "Current Kill POI dead. Clearing POI " + unit.SafeName() + "!");
-                                                BotPoi.Clear("Unit is dead");
+                                                BotPoi.Clear("Singular detected Unit is dead");
                                             }
-                                            else if (!Blacklist.Contains(unit, BlacklistFlags.Combat))
+                                            else if (Blacklist.Contains(unit, BlacklistFlags.Combat))
                                             {
                                                 Logger.Write(targetColor, "Current Kill POI is blacklisted. Clearing POI " + unit.SafeName() + "!");
-                                                BotPoi.Clear("Unit is dead");
+                                                BotPoi.Clear("Singular detected Unit is Blacklisted");
                                             }
                                             else 
                                             {
@@ -281,15 +289,16 @@ namespace Singular.Helpers
                                             }
                                         }
 
-                                        // Look for agrroed mobs next
-                                        var target = ObjectManager.GetObjectsOfType<WoWUnit>(false, false)
+                                        // Look for agrroed mobs next. prioritize by IsPlayer, Relative Distance, then Health
+                                        var target = Targeting.Instance.TargetList
                                             .Where(
                                                 p => !Blacklist.Contains(p, BlacklistFlags.Combat)
                                                 && Unit.ValidUnit(p)
-                                                && p.DistanceSqr <= 40 * 40
+                                                // && p.DistanceSqr <= 40 * 40  // dont restrict check to 40 yds
                                                 && (p.Aggro || p.PetAggro || (p.Combat && p.GotTarget && (p.IsTargetingMeOrPet || p.IsTargetingMyRaidMember))))
                                             .OrderBy(u => u.IsPlayer)
-                                            .ThenBy(u => u.DistanceSqr)
+                                            .ThenBy(u => CalcDistancePriority(u))
+                                            .ThenBy(u => u.HealthPercent )
                                             .FirstOrDefault();
 
                                         if (target != null)
@@ -299,12 +308,39 @@ namespace Singular.Helpers
                                             return target;
                                         }
 
+                                        // if we have BotPoi then try it
+                                        if (SingularRoutine.CurrentWoWContext == WoWContext.Normal && BotPoi.Current.Type == PoiType.Kill)
+                                        {
+                                            var unit = BotPoi.Current.AsObject as WoWUnit;
+                                            if (unit == null)
+                                            {
+                                                Logger.Write(targetColor, "Current Kill POI invalid. Clearing POI!");
+                                                BotPoi.Clear("Singular detected null POI");
+                                            }
+                                            else if (!unit.IsAlive)
+                                            {
+                                                Logger.Write(targetColor, "Current Kill POI dead. Clearing POI " + unit.SafeName() + "!");
+                                                BotPoi.Clear("Singular detected Unit is dead");
+                                            }
+                                            else if (Blacklist.Contains(unit, BlacklistFlags.Combat))
+                                            {
+                                                Logger.Write(targetColor, "Current Kill POI is blacklisted. Clearing POI " + unit.SafeName() + "!");
+                                                BotPoi.Clear("Singular detected Unit is Blacklisted");
+                                            }
+                                            else
+                                            {
+                                                Logger.Write(targetColor, "Current target invalid. Switching to POI " + unit.SafeName() + "!");
+                                                return unit;
+                                            }
+                                        }
+
                                         // now anything in the target list or a Player
                                         target = Targeting.Instance.TargetList
                                             .Where(
                                                 p => !Blacklist.Contains(p, BlacklistFlags.Combat)
                                                 && p.IsAlive
-                                                && p.DistanceSqr <= 40 * 40)
+                                                // && p.DistanceSqr <= 40 * 40 // don't restrict check to 40 yds
+                                                )
                                             .OrderBy(u => u.IsPlayer)
                                             .ThenBy(u => u.DistanceSqr)
                                             .FirstOrDefault();
@@ -341,27 +377,35 @@ namespace Singular.Helpers
                                         }
     */
                                         // And there's nothing left, so just return null, kthx.
-                                        Logger.Write(targetColor, "Current target invalid.  No other targets available");
+                                        // ... but show a message about botbase still calling our Combat behavior with nothing to kill
+                                        if ( DateTime.Now >= _timeNextInvalidTargetMessage)
+                                        {
+                                            _timeNextInvalidTargetMessage = DateTime.Now + TimeSpan.FromSeconds(1);
+                                            Logger.Write(targetColor, "Bot TargetList is empty, no targets available");
+                                        }
+
                                         return null;
                                     },
+
                                     // Make sure the target is VALID. If not, then ignore this next part. (Resolves some silly issues!)
                                     new Decorator(
                                         ret => ret != null && ((WoWUnit)ret).Guid != StyxWoW.Me.CurrentTargetGuid,
                                         new Sequence(
-                                            new DecoratorContinue(
-                                                ret => StyxWoW.Me.CurrentPendingCursorSpell != null,
-                                                new Sequence(
-                                                    new Action( r => Logger.WriteDebug( "EnsureTarget: /cancel Pending Spell {0}", StyxWoW.Me.CurrentPendingCursorSpell.Name)),
-                                                    new Action(ctx => Lua.DoString("SpellStopTargeting()"))
-                                                    )
-                                                ),
-                                            new Action(ret => Logger.WriteDebug("EnsureTarget: set target to chosen target {0}", ((WoWUnit)ret).SafeName())),
+                                            CreateClearPendingCursorSpell(RunStatus.Success),
+                                            new Action(ret => Logger.WriteDebug(targetColor, "EnsureTarget: set target to chosen target {0}", ((WoWUnit)ret).SafeName())),
                                             new Action(ret => ((WoWUnit)ret).Target()),
                                             new WaitContinue( 2, ret => StyxWoW.Me.CurrentTarget != null && StyxWoW.Me.CurrentTargetGuid == ((WoWUnit)ret).Guid, new ActionAlwaysSucceed())
                                             )
                                         ),
 
-                                    new ActionAlwaysSucceed()
+                                    // looks like no success, so don't continue to spell priorities
+                                    new Decorator( 
+                                        ret => !Me.GotTarget || Me.CurrentTarget.IsDead,
+                                        new ActionAlwaysSucceed()
+                                        ),
+
+                                    // otherwise, we are here if current target is valid or we set a good one, either way... fall through
+                                    new ActionAlwaysFail()
                                     )
                                 )
                             )
@@ -369,6 +413,47 @@ namespace Singular.Helpers
 
                         )
                     );
+        }
+
+        /// <summary>
+        /// targeting is blocked if pending spell on cursor, so this routine checks if a spell is on cursor
+        /// awaiting target and if so clears
+        /// </summary>
+        /// <param name="finalResult">what result should be regardless of clearing spell</param>
+        /// <returns>always finalResult</returns>
+        private static Composite CreateClearPendingCursorSpell(RunStatus finalResult)
+        {
+            Sequence seq = new Sequence(
+                new Action(r => Logger.WriteDebug(targetColor, "EnsureTarget: /cancel Pending Spell {0}", Spell.GetPendingCursorSpell.Name)),
+                new Action(ctx => Lua.DoString("SpellStopTargeting()"))
+                );
+
+            if (finalResult == RunStatus.Success )
+                return new DecoratorContinue(ret => Spell.GetPendingCursorSpell != null, seq);
+
+            seq.AddChild( new ActionAlwaysFail() );
+            return new Decorator(ret => Spell.GetPendingCursorSpell != null, seq);
+        }
+
+        /// <summary>
+        /// assigns a priority based upon bands of distance.  allows treating all mobs within melee range the same
+        /// rather than sorting purely by distance
+        /// </summary>
+        /// <param name="unit">unit</param>
+        /// <returns>relative distance priority, where 1 is closest. 2 further away, etc</returns>
+        private static int CalcDistancePriority(this WoWUnit unit)
+        {
+            int prio = (int) Me.SpellDistance(unit);
+            if (prio <= 5)
+                prio = 1;
+            else if (prio <= 10)
+                prio = 2;
+            else if (prio <= 20)
+                prio = 3;
+            else
+                prio = 4;
+
+            return prio;
         }
     }
 }

@@ -37,11 +37,19 @@ namespace Singular.ClassSpecific.Shaman
                 if ( Me.Specialization == WoWSpec.ShamanEnhancement )
                     return Me.GotTarget && Me.CurrentTarget.Distance < Me.MeleeDistance(Me.CurrentTarget) + 10;
 
-                if ( Me.IsMoving )
-                    return false;
-
-                if ( SingularRoutine.CurrentWoWContext == WoWContext.Instances )
-                    return Group.Tanks.Any( t => t.Distance < 50 && t.GotTarget && t.Location.Distance(t.CurrentTarget.Location) <= t.MeleeDistance(t.CurrentTarget) + 5);
+                if (SingularRoutine.CurrentWoWContext == WoWContext.Instances)
+                {
+                    if ( !Me.GotTarget )
+                        return false;
+                    
+                    if ( Me.CurrentTarget.IsMoving )
+                        return false;
+                    
+                    if (Me.SpellDistance(Me.CurrentTarget) > Totems.GetTotemRange(WoWTotem.Searing))
+                        return false;
+                    
+                    return true;
+                }
 
                 return !Me.GotTarget || Me.CurrentTarget.SpellDistance() < 40;
             }
@@ -70,7 +78,7 @@ namespace Singular.ClassSpecific.Shaman
 
                     Spell.BuffSelf("Searing Totem",
                         ret => Me.GotTarget 
-                            && Me.CurrentTarget.Distance < GetTotemRange(WoWTotem.Searing) - 2f 
+                            && Me.CurrentTarget.SpellDistance() < GetTotemRange(WoWTotem.Searing) - 2f 
                             && !Exist( WoWTotemType.Fire))
                     );
 
@@ -138,7 +146,7 @@ namespace Singular.ClassSpecific.Shaman
                                 if (Me.Specialization != WoWSpec.ShamanRestoration)
                                     return false;
 
-                                Logger.WriteDebug("Mana Tide Totem Check:  current mana {0:F1}%", Me.ManaPercent);
+                                // Logger.WriteDebug("Mana Tide Totem Check:  current mana {0:F1}%", Me.ManaPercent);
                                 if (Me.ManaPercent > ShamanSettings.ManaTideTotemPercent )
                                     return false;
                                 if (Exist(WoWTotem.HealingTide, WoWTotem.HealingStream))
@@ -155,8 +163,7 @@ namespace Singular.ClassSpecific.Shaman
         */
 
                         // air totems
-                        Spell.Cast("Stormlash Totem",
-                            ret => PartyBuff.WeHaveBloodlust),
+                        Spell.Cast("Stormlash Totem", ret => PartyBuff.WeHaveBloodlust && !Me.HasAura("Stormlash Totem")),
 
                         new Decorator(
                             ret => !Exist(WoWTotemType.Air),
@@ -188,15 +195,22 @@ namespace Singular.ClassSpecific.Shaman
             // create Fire Totems behavior first, then wrap if needed
             Composite fireTotemBehavior =
                 new PrioritySelector(
-                    //Spell.Cast("Fire Elemental Totem", ret => Me.CurrentTarget.IsBoss())
+                    new Action( r => {
+                        return RunStatus.Failure;
+                        }),
+
+                    Spell.BuffSelf("Fire Elemental", ret => Me.CurrentTarget.IsBoss()),
 
                     // Magma handled within each specs AoE support
 
-                    //Spell.Cast("Searing Totem", ret => !Totems.Exist(WoWTotemType.Fire) && Me.CurrentTarget.Distance < GetTotemRange(WoWTotem.Searing) - 2f)
+                    Spell.BuffSelf("Searing Totem",
+                        ret => Me.GotTarget
+                            && Me.CurrentTarget.SpellDistance() < GetTotemRange(WoWTotem.Searing) - 2f
+                            && (!Exist(WoWTotemType.Fire) || (GetTotem( WoWTotem.Searing) != null && GetTotem(WoWTotem.Searing).Expires < DateTime.Now + TimeSpan.FromSeconds(3))))
                     );
 
             if (Me.Specialization == WoWSpec.ShamanRestoration)
-                fireTotemBehavior = new Decorator(ret => StyxWoW.Me.Combat && StyxWoW.Me.GotTarget && !Unit.NearbyGroupMembers.Any(m => m.IsAlive), fireTotemBehavior);
+                fireTotemBehavior = new Decorator(ret => StyxWoW.Me.Combat && StyxWoW.Me.GotTarget && !HealerManager.Instance.TargetList.Any(m => m.IsAlive), fireTotemBehavior);
 
             // now 
             return new PrioritySelector(
@@ -226,7 +240,7 @@ namespace Singular.ClassSpecific.Shaman
                                 if (Me.Specialization != WoWSpec.ShamanRestoration)
                                     return false;
 
-                                Logger.WriteDebug("Mana Tide Totem Check:  current mana {0:F1}%", Me.ManaPercent);
+                                // Logger.WriteDebug("Mana Tide Totem Check:  current mana {0:F1}%", Me.ManaPercent);
                                 if (Me.ManaPercent > ShamanSettings.ManaTideTotemPercent)
                                     return false;
                                 if (Exist(WoWTotem.HealingTide, WoWTotem.HealingStream))
@@ -244,7 +258,7 @@ namespace Singular.ClassSpecific.Shaman
         */
 
                         // air totems
-                        Spell.Cast("Stormlash Totem", ret => PartyBuff.WeHaveBloodlust),
+                        Spell.Cast("Stormlash Totem", ret => PartyBuff.WeHaveBloodlust && !Me.HasAura("Stormlash Totem")),
 
                         new Decorator(
                             ret => !Exist(WoWTotemType.Air),
@@ -485,7 +499,6 @@ namespace Singular.ClassSpecific.Shaman
         {
             switch (totem)
             {
-                case WoWTotem.HealingStream:
                 case WoWTotem.Tremor:
                     return 30f;
 
@@ -516,6 +529,9 @@ namespace Singular.ClassSpecific.Shaman
 
                 case WoWTotem.StoneBulwark:
                     // No idea, unlike former glyphed stoneclaw it has a 5 sec pluse shield component so range is more important
+                    return 40f;
+
+                case WoWTotem.HealingStream:
                     return 40f;
 
                 case WoWTotem.HealingTide:

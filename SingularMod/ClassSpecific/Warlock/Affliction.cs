@@ -36,14 +36,9 @@ namespace Singular.ClassSpecific.Warlock
         public static Composite CreateWarlockAfflictionNormalPull()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
-
-                Spell.WaitForCast(true),
+                Spell.WaitForCast(FaceDuring.Yes),
 
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown(),
@@ -58,24 +53,29 @@ namespace Singular.ClassSpecific.Warlock
                         Helpers.Common.CreateAutoAttack(true),
                         CreateApplyDotsBehavior(onUnit => Me.CurrentTarget, ret => true)
                         )
-                    ),
-
-                Movement.CreateMoveToRangeAndStopBehavior(ret => Me.CurrentTarget, ret => 35f)
+                    )
                 );
         }
+
+        [Behavior(BehaviorType.Heal, WoWClass.Warlock, WoWSpec.WarlockAffliction, priority: 999)]
+        public static Composite CreateWarlockAfflictionHeal()
+        {
+            return CreateWarlockDiagnosticOutputBehavior("Combat");
+        }
+
 
         [Behavior(BehaviorType.Combat, WoWClass.Warlock, WoWSpec.WarlockAffliction, WoWContext.Normal)]
         [Behavior(BehaviorType.Combat, WoWClass.Warlock, WoWSpec.WarlockAffliction, WoWContext.Instances)]
         public static Composite CreateWarlockAfflictionNormalCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
                 Helpers.Common.CreateAutoAttack(true),
 
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
+                // Movement.CreateEnsureMovementStoppedBehavior(35f),
+
+                new Action(r => { if ( Me.GotTarget) Me.CurrentTarget.TimeToDeath(); return RunStatus.Failure; } ),
 
                 // cancel an early drain soul if done to proc 1 soulshard
                 new Decorator(
@@ -95,7 +95,7 @@ namespace Singular.ClassSpecific.Warlock
                         // cancel malefic grasp if target health < 20% and cast drain soul (revisit and add check for minimum # of dots)
                         new Decorator(
                             ret => Me.ChanneledSpell.Name == "Malefic Grasp"
-                                && Me.CurrentSoulShards < Me.MaxSoulShards
+                                // && Me.CurrentSoulShards < Me.MaxSoulShards
                                 && Me.CurrentTarget.HealthPercent <= 20,
                             new Sequence(
                                 new Action(ret => Logger.WriteDebug("/cancel Malefic Grasp on {0} @ {1:F1}%", Me.CurrentTarget.SafeName(), Me.CurrentTarget.HealthPercent)),
@@ -122,8 +122,6 @@ namespace Singular.ClassSpecific.Warlock
                             return RunStatus.Failure;
                         }),
 
-                        CreateWarlockDiagnosticOutputBehavior("Combat"),
-
                         CreateAoeBehavior(),
 
                         // following Drain Soul only while Solo combat to maximize Soul Shard generation
@@ -136,11 +134,11 @@ namespace Singular.ClassSpecific.Warlock
 
                         CreateApplyDotsBehavior(
                             ret => Me.CurrentTarget,
-//                            ret => Me.CurrentTarget.HealthPercent < 20 || Me.CurrentTarget.HasAnyAura("Agony", "Corruption", "Unstable Affliction")),
-                            ret => (Me.CurrentTarget.IsPlayer || Me.CurrentTarget.HealthPercent > 20)
-                                && !Me.CurrentTarget.HasAnyOfMyAuras("Agony", "Corruption", "Unstable Affliction")),
+                //                            ret => Me.CurrentTarget.HealthPercent < 20 || Me.CurrentTarget.HasAnyAura("Agony", "Corruption", "Unstable Affliction")),
+                            ret => (Me.CurrentTarget.IsPlayer || Me.CurrentTarget.HealthPercent > 20 || Me.TimeToDeath() > 15)
+                                && !Me.CurrentTarget.HasAnyOfMyAuras("Agony", "Corruption", "Unstable Affliction", "Haunt")),
 
-                        Spell.Cast("Malefic Grasp", ret => Me.CurrentTarget.HealthPercent >= 20),
+                        Spell.Cast("Malefic Grasp", ret => Me.CurrentTarget.HealthPercent > 20),
                         Spell.Cast("Shadow Bolt", ret => !SpellManager.HasSpell("Malefic Grasp")),
                         Spell.Cast("Drain Soul"),
 
@@ -149,9 +147,7 @@ namespace Singular.ClassSpecific.Warlock
                         // only a lowbie should hit this
                         Spell.Cast("Drain Life", ret => !SpellManager.HasSpell("Malefic Grasp"))
                         )
-                    ),
-
-                Movement.CreateMoveToRangeAndStopBehavior(ret => Me.CurrentTarget, ret => 35f)
+                    )
                 );
 
         }
@@ -161,11 +157,7 @@ namespace Singular.ClassSpecific.Warlock
         public static Composite CreateWarlockAfflictionPvpCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-
-                Movement.CreateEnsureMovementStoppedBehavior(30f),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
                 // cancel an early drain soul if done to proc 1 soulshard
                 new Decorator(
@@ -213,8 +205,6 @@ namespace Singular.ClassSpecific.Warlock
                             return RunStatus.Failure;
                         }),
 
-                        CreateWarlockDiagnosticOutputBehavior("Combat"),
-
 #if NOT_NOW
                         new Throttle( 4, 
                             Spell.Cast( "Curse of Enfeeblement", 
@@ -261,16 +251,14 @@ namespace Singular.ClassSpecific.Warlock
                             CreateApplyDotsBehaviorPvp(on => (WoWUnit)on, ret => true)
                             ),
 
-                        Spell.Cast("Malefic Grasp", ret => Me.CurrentTarget.HealthPercent >= 20),
+                        Spell.Cast("Malefic Grasp", ret => Me.CurrentTarget.HealthPercent > 20),
                         Spell.Cast("Shadow Bolt", ret => !SpellManager.HasSpell("Malefic Grasp")),
                         Spell.Cast("Drain Soul"),
 
                         // only a lowbie should hit this
                         Spell.Cast("Drain Life", ret => !SpellManager.HasSpell("Malefic Grasp"))
                         )
-                    ),
-
-                Movement.CreateMoveToRangeAndStopBehavior(ret => Me.CurrentTarget, ret => 35f)
+                    )
                 );
 
         }
@@ -284,40 +272,61 @@ namespace Singular.ClassSpecific.Warlock
                     new Decorator(
                         ret => _mobCount >= 4 && SpellManager.HasSpell("Seed of Corruption"),
                         new PrioritySelector(
-                            ctx => Common.TargetsInCombat.FirstOrDefault(m => !m.HasAura("Seed of Corruption")),
-                            new Sequence(
-                                new PrioritySelector(
-                                    Common.CreateCastSoulburn(ret => ret != null),
-                                    new ActionAlwaysSucceed()
-                                    ),
-                                Spell.Cast("Seed of Corruption", ret => (WoWUnit)ret)
+                            // if current target doesn't have CotE, then Soulburn+CotE
+                            new Decorator(
+                                req => !Me.CurrentTarget.HasAura("Curse of the Elements"),
+                                new Sequence(
+                                    Common.CreateCastSoulburn(req => true),
+                                    Spell.Buff("Curse of the Elements")
+                                    )
+                                ),
+                            // roll SoC on targets in combat that we are facing
+                            new PrioritySelector(
+                                ctx => Common.TargetsInCombat.FirstOrDefault(m => !m.HasAura("Seed of Corruption")),
+                                new Sequence(
+                                    new PrioritySelector(
+                                        Common.CreateCastSoulburn(req => req != null),
+                                        new ActionAlwaysSucceed()
+                                        ),
+                                    Spell.Cast("Seed of Corruption", on => (WoWUnit)on)
+                                    )
                                 )
                             )
                         ),
                     new Decorator(
                         ret => _mobCount >= 2,
                         new PrioritySelector(
-                            CreateApplyDotsBehavior(ctx => Common.TargetsInCombat.FirstOrDefault(m => m.HasAuraExpired("Agony")), soulBurn => true)
-                // , CreateApplyDotsBehavior( ctx => TargetsInCombat.FirstOrDefault(m => Common.AuraMissing(m,"Corruption")), soulBurn => true)
-                            , CreateApplyDotsBehavior(ctx => Common.TargetsInCombat.FirstOrDefault(m => m.HasAuraExpired("Unstable Affliction")), soulBurn => true)
+                            CreateApplyDotsBehavior(ctx => Common.TargetsInCombat.FirstOrDefault(m => m.HasAuraExpired("Agony")), soulBurn => true),
+                            // CreateApplyDotsBehavior( ctx => TargetsInCombat.FirstOrDefault(m => Common.AuraMissing(m,"Corruption")), soulBurn => true),
+                            CreateApplyDotsBehavior(ctx => Common.TargetsInCombat.FirstOrDefault(m => m.HasAuraExpired("Unstable Affliction")), soulBurn => true)
                             )
                         )
                     )
                 );
         }
 
+        private static int _dotCount = 0;
+
         public static Composite CreateApplyDotsBehavior(UnitSelectionDelegate onUnit, SimpleBooleanDelegate soulBurn)
         {
             return new PrioritySelector(
 
-                    // target below 20% we have a higher prior on Haunt (but skip if soulburn already up...)
-                   Spell.Buff("Haunt", 
-                        true,
-                        ctx => onUnit(ctx),
-                        req => Me.CurrentSoulShards > 0
-                            && Me.CurrentTarget.HealthPercent < 20
-                            && !Me.HasAura("Soulburn"),
-                        2),
+                    new Decorator(
+                        ret => !Me.HasAura("Soulburn"),
+                        new PrioritySelector(
+                            // target below 20% we have a higher prior on Haunt (but skip if soulburn already up...)
+                           Spell.Buff("Haunt", 
+                                true,
+                                ctx => onUnit(ctx),
+                                req => Me.CurrentSoulShards > 0
+                                    && Me.CurrentTarget.HealthPercent < 20
+                                    && !Me.HasAura("Soulburn"),
+                                2),
+
+                            // otherwise, save 2 shards for Soulburn and instant pet rez if needed (unless Misery buff up)
+                            Spell.Buff("Haunt", true, ctx => onUnit(ctx), req => Me.CurrentSoulShards > 2 || Me.HasAura("Dark Soul: Misery"), 2)
+                            )
+                        ),
 
                     new Sequence(
                        Common.CreateCastSoulburn(
@@ -332,10 +341,33 @@ namespace Singular.ClassSpecific.Warlock
                         CreateCastSoulSwap(onUnit)
                         ),
 
-                    Spell.Buff("Agony", true, ctx => onUnit(ctx), ret => true, 3),
-                    Spell.Buff("Corruption", true, ctx => onUnit(ctx), ret => true, 3),
-                    Spell.Buff("Unstable Affliction", true, ctx => onUnit(ctx), req => true, 3),
-                    Spell.Buff("Haunt", true, ctx => onUnit(ctx), req => true, 2)
+                    new Action( ret => {
+                        _dotCount = 0;
+                        if (onUnit != null && onUnit(ret) != null)
+                        {
+                            if (!onUnit(ret).HasAuraExpired("Agony", 3))
+                                ++_dotCount;
+                            if (!onUnit(ret).HasAuraExpired("Corruption", 3))
+                                ++_dotCount;
+                            if (!onUnit(ret).HasAuraExpired("Unstable Affliction", 3))
+                                ++_dotCount;
+                            if (!onUnit(ret).HasAuraExpired("Haunt", 3))
+                                ++_dotCount;
+
+                            // if mob dying very soon, skip DoTs
+                            if (onUnit(ret).TimeToDeath() < 4)
+                                _dotCount = 4;
+                        }
+                        return RunStatus.Failure;
+                        }),
+                    new Decorator(
+                        req => _dotCount < 4,
+                        new PrioritySelector(
+                            Spell.Buff("Agony", true, onUnit, ret => true, 3),
+                            Spell.Buff("Corruption", true, onUnit, ret => true, 3),
+                            Spell.Buff("Unstable Affliction", true, onUnit, req => true, 3)
+                            )
+                        )
                     );
         }
 
@@ -421,7 +453,7 @@ namespace Singular.ClassSpecific.Warlock
                         sState,
                         Me.HealthPercent,
                         Me.ManaPercent,
-                        Me.IsMoving,
+                        Me.IsMoving.ToYN(),
                         Me.GotAlivePet ? Me.Pet.HealthPercent : 0,
                         Me.GotAlivePet ? Me.Pet.Distance : 0,
                         (long)Me.GetAuraTimeLeft("Soulburn", true).TotalMilliseconds
@@ -432,13 +464,13 @@ namespace Singular.ClassSpecific.Warlock
                     if (target != null)
                     {
                         sMsg += string.Format(
-                            ", {0}, {1:F1}%, dies {2}, {3:F1} yds, loss={4}, face={5}, agony={6}, corr={7}, ua={8}, haunt={9}, seed={10}, aoe={11}",
+                            ", {0}, {1:F1}%, dies={2} secs, {3:F1} yds, loss={4}, face={5}, agony={6}, corr={7}, ua={8}, haunt={9}, seed={10}, aoe={11}",
                             target.SafeName(),
                             target.HealthPercent,
                             target.TimeToDeath(),
                             target.Distance,
-                            target.InLineOfSpellSight,
-                            Me.IsSafelyFacing(target),
+                            target.InLineOfSpellSight.ToYN(),
+                            Me.IsSafelyFacing(target).ToYN(),
                             (long)target.GetAuraTimeLeft("Agony", true).TotalMilliseconds,
                             (long)target.GetAuraTimeLeft("Corruption", true).TotalMilliseconds,
                             (long)target.GetAuraTimeLeft("Unstable Affliction", true).TotalMilliseconds,

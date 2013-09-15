@@ -22,19 +22,21 @@ namespace Singular.ClassSpecific.Rogue
     {
         private static LocalPlayer Me { get { return StyxWoW.Me; } }
         private static RogueSettings RogueSettings { get { return SingularSettings.Instance.Rogue(); } }
+        private static bool HasTalent(RogueTalents tal) { return TalentManager.IsSelected((int)tal); } 
 
         #region Normal Rotation
         [Behavior(BehaviorType.Pull, WoWClass.Rogue, WoWSpec.RogueCombat, WoWContext.Normal | WoWContext.Battlegrounds | WoWContext.Instances )]
         public static Composite CreateRogueCombatPull()
         {
             return new PrioritySelector(
-                Common.CreateRoguePullBuffs(),      // needed because some Bots not calling this behavior
-
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
                 Helpers.Common.CreateDismount("Pulling"),
+                Common.CreateRoguePullBuffs(),      // needed because some Bots not calling this behavior
+                Safers.EnsureTarget(),
+                Common.CreateRogueControlNearbyEnemyBehavior(),
+                Common.CreateRogueMoveBehindTarget(),
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
                 Spell.WaitForCastOrChannel(),
+
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown() && Me.GotTarget && Me.IsSafelyFacing(Me.CurrentTarget),
                     new PrioritySelector(
@@ -42,22 +44,14 @@ namespace Singular.ClassSpecific.Rogue
                         CreateCombatDiagnosticOutputBehavior("Pull"),
 
                         Common.CreateRogueOpenerBehavior(),
-
-                        Common.CreateAttackFlyingMobs(),
+                        Common.CreatePullMobMovingAwayFromMe(),
+                        Common.CreateAttackFlyingOrUnreachableMobs(),
 
                         // ok, everything else failed so just hit him!!!!
-                        new Decorator(
-                            ret => !Common.IsStealthed &&  Me.CurrentTarget.IsWithinMeleeRange,
-                            new PrioritySelector(
-                                Spell.Buff("Revealing Strike", true, ret => true),
-                                Spell.Cast("Sinister Strike")
-                                )
-                            )
+                        Spell.Buff("Revealing Strike", true, ret => true),
+                        Spell.Cast("Sinister Strike")
                         )
-                    ),
-
-                Movement.CreateMoveBehindTargetBehavior(),
-                Movement.CreateMoveToMeleeBehavior(true)
+                    )
                 );
         }
 
@@ -66,8 +60,8 @@ namespace Singular.ClassSpecific.Rogue
         {
             return new PrioritySelector(
                 Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
+                Common.CreateRogueMoveBehindTarget(),
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
 
                 Spell.WaitForCastOrChannel(),
 
@@ -78,11 +72,8 @@ namespace Singular.ClassSpecific.Rogue
                         // updated time to death tracking values before we need them
                         new Action(ret => { Me.CurrentTarget.TimeToDeath(); return RunStatus.Failure; }),
 
-                        CreateCombatDiagnosticOutputBehavior("Combat"),
-
-                        new Throttle( Helpers.Common.CreateInterruptBehavior()),
-
-                        Movement.CreateMoveBehindTargetBehavior(),
+                        Helpers.Common.CreateInterruptBehavior(),
+                        Common.CreateDismantleBehavior(),
 
                         Common.CreateRogueOpenerBehavior(),
 
@@ -123,9 +114,7 @@ namespace Singular.ClassSpecific.Rogue
                         Spell.Cast("Fan of Knives", ret => Common.AoeCount >= RogueSettings.FanOfKnivesCount),
                         Spell.Cast("Sinister Strike")
                         )
-                    ),
-
-                Movement.CreateMoveToMeleeBehavior(true)
+                    )
                 );
         }
 
@@ -139,8 +128,8 @@ namespace Singular.ClassSpecific.Rogue
         {
             return new PrioritySelector(
                 Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
+                Common.CreateRogueMoveBehindTarget(),
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
 
                 Spell.WaitForCastOrChannel(),
                 new Decorator(
@@ -148,16 +137,15 @@ namespace Singular.ClassSpecific.Rogue
                     new PrioritySelector(
                         new Action(ret => { Me.CurrentTarget.TimeToDeath(); return RunStatus.Failure; }),
 
-                        CreateCombatDiagnosticOutputBehavior("Combat"),
-
                         Helpers.Common.CreateInterruptBehavior(),
+                        Common.CreateDismantleBehavior(),
 
                         // Instance Specific Behavior
                         Spell.Cast("Tricks of the Trade", ret => Common.BestTricksTarget, ret => RogueSettings.UseTricksOfTheTrade),
                         // Spell.Cast("Feint", ret => Me.CurrentTarget.ThreatInfo.RawPercent > 80),
 
                         // Resume standard priorities
-                        Movement.CreateMoveBehindTargetBehavior(),
+                        Common.CreateRogueMoveBehindTarget(),
 
                         Spell.BuffSelf("Adrenaline Rush", 
                             ret => Me.CurrentEnergy < 20 && !Me.HasAura("Killing Spree")),
@@ -193,9 +181,7 @@ namespace Singular.ClassSpecific.Rogue
                         Spell.Cast("Fan of Knives", ret => Common.AoeCount >= RogueSettings.FanOfKnivesCount),
                         Spell.Cast("Sinister Strike")
                         )
-                    ),
-
-                Movement.CreateMoveToMeleeBehavior(true)
+                    )
                 );
         }
 
@@ -214,6 +200,12 @@ namespace Singular.ClassSpecific.Rogue
                         )
                     )
                 );
+        }
+
+        [Behavior(BehaviorType.Heal, WoWClass.Rogue, WoWSpec.RogueCombat, priority: 99)]
+        public static Composite CreateRogueHeal()
+        {
+            return CreateCombatDiagnosticOutputBehavior("Combat");
         }
 
         private static Composite CreateCombatDiagnosticOutputBehavior(string sState = "")

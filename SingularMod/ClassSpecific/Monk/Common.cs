@@ -34,18 +34,11 @@ namespace Singular.ClassSpecific.Monk
         public static Composite CreateMonkPreCombatBuffs()
         {
             return new PrioritySelector(
-
-                Spell.WaitForCastOrChannel(),
-                new Decorator(
-                    ret => !Spell.IsGlobalCooldown(),
-                    new PrioritySelector(               
-                        // behaviors handling group buffing... handles special moments like
-                        // .. during the buff spam parade during battleground preparation, etc.
-                        // .. check our own buffs in PullBuffs and CombatBuffs if needed
-                        PartyBuff.BuffGroup("Legacy of the White Tiger"),
-                        PartyBuff.BuffGroup("Legacy of the Emperor")
-                        )
-                    )
+                // behaviors handling group buffing... handles special moments like
+                // .. during the buff spam parade during battleground preparation, etc.
+                // .. check our own buffs in PullBuffs and CombatBuffs if needed
+                PartyBuff.BuffGroup("Legacy of the White Tiger"),
+                PartyBuff.BuffGroup("Legacy of the Emperor")
                 );
         }
 
@@ -56,8 +49,8 @@ namespace Singular.ClassSpecific.Monk
                 ret => !Spell.IsGlobalCooldown() && !Spell.IsCastingOrChannelling(),
                 new PrioritySelector(
                     Spell.BuffSelf("Dematerialize"),
-                    Spell.BuffSelf("Nimble Brew", ret => Me.Stunned || Me.Fleeing ),
-                    Spell.BuffSelf("Dampen Harm", ret => Me.Stunned && Unit.NearbyUnitsInCombatWithMe.Any()),
+                    Spell.BuffSelf("Nimble Brew", ret => Me.Stunned || Me.Fleeing || Me.HasAuraWithMechanic( WoWSpellMechanic.Horrified )),
+                    Spell.BuffSelf("Dampen Harm", ret => Me.Stunned && Unit.NearbyUnitsInCombatWithMeOrMyStuff.Any()),
                     Spell.BuffSelf("Tiger's Lust", ret => Me.Rooted && !Me.HasAuraWithEffect( WoWApplyAuraType.ModIncreaseSpeed))
                     )
                 );
@@ -66,16 +59,23 @@ namespace Singular.ClassSpecific.Monk
         [Behavior(BehaviorType.CombatBuffs, WoWClass.Monk, (WoWSpec)int.MaxValue, WoWContext.All, 2)]
         public static Composite CreateMonkCombatBuffs()
         {
-            return new PrioritySelector(               
-                // check our individual buffs here
+            return new PrioritySelector(
+                
                 Spell.BuffSelf( "Legacy of the White Tiger"),
                 Spell.BuffSelf( "Legacy of the Emperor"),
-                Spell.Buff("Disable", ret => Me.GotTarget && Me.CurrentTarget.IsPlayer && Me.CurrentTarget.ToPlayer().IsHostile && !Me.CurrentTarget.HasAuraWithEffect( WoWApplyAuraType.ModDecreaseSpeed)),
 
-                Spell.BuffSelf( "Ring of Peace", 
-                    ret => Me.GotTarget 
-                        && Me.CurrentTarget.SpellDistance() < 8
-                        && (Me.CurrentTarget.IsPlayer || Unit.NearbyUnitsInCombatWithMe.Count() > 1))
+                new Decorator(
+                    req => !Unit.IsTrivial(Me.CurrentTarget),
+                    new PrioritySelector(               
+                        // check our individual buffs here
+                        Spell.Buff("Disable", ret => Me.GotTarget && Me.CurrentTarget.IsPlayer && Me.CurrentTarget.ToPlayer().IsHostile && !Me.CurrentTarget.HasAuraWithEffect( WoWApplyAuraType.ModDecreaseSpeed)),
+
+                        Spell.BuffSelf( "Ring of Peace", 
+                            ret => Me.GotTarget 
+                                && Me.CurrentTarget.SpellDistance() < 8
+                                && (Me.CurrentTarget.IsPlayer || Unit.NearbyUnitsInCombatWithMeOrMyStuff.Count() > 1))
+                        )
+                    )
                 );
         }
 
@@ -340,7 +340,7 @@ namespace Singular.ClassSpecific.Monk
                         && (Me.PowerType != WoWPowerType.Mana)
                         && !Common.AnySpheres(SphereType.Healing, 1f),
                     false),
-                new WaitContinue( TimeSpan.FromMilliseconds(500), ret => Me.CurrentPendingCursorSpell != null, new ActionAlwaysSucceed()),
+                new WaitContinue( TimeSpan.FromMilliseconds(500), ret => Spell.GetPendingCursorSpell != null, new ActionAlwaysSucceed()),
                 new Action(ret => Lua.DoString("SpellStopTargeting()")),
                 new WaitContinue( 
                     TimeSpan.FromMilliseconds(750), 
@@ -354,9 +354,26 @@ namespace Singular.ClassSpecific.Monk
         /// cast grapple weapon, dealing with issues of mobs immune to that spell
         /// </summary>
         /// <returns></returns>
-        public static Composite GrappleWeapon()
+        public static Composite CreateGrappleWeaponBehavior()
         {
-            return new Throttle(1, 5, Spell.Cast("Grapple Weapon", ret => !Me.Elite && Me.CurrentTarget.Distance < 40 && !Me.CurrentTarget.Disarmed));
+            if (!MonkSettings.UseGrappleWeapon)
+                return new ActionAlwaysFail();
+
+            return new Throttle(15,
+                Spell.Cast("Grapple Weapon", on =>
+                {
+                    if (Spell.IsSpellOnCooldown("Grapple Weapon"))
+                        return null;
+
+                    WoWUnit unit = Unit.NearbyUnitsInCombatWithMeOrMyStuff.FirstOrDefault(
+                        u => u.SpellDistance() < 40
+                            && !Me.CurrentTarget.Disarmed
+                            && !Me.CurrentTarget.IsCrowdControlled()
+                            && Me.IsSafelyFacing(u, 150)
+                            );
+                    return unit;
+                })
+                );
         }
     }
 

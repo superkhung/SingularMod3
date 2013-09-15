@@ -7,13 +7,14 @@ using Styx.WoWInternals.WoWObjects;
 using DefaultValue = Styx.Helpers.DefaultValueAttribute;
 using Styx;
 using System.Drawing;
+using System;
 
 namespace Singular.Settings
 {
     internal class ShamanSettings : Styx.Helpers.Settings
     {
         public ShamanSettings()
-            : base(Path.Combine(SingularSettings.SettingsPath, "Shaman.xml"))
+            : base(Path.Combine(SingularSettings.SingularSettingsPath, "Shaman.xml"))
         {
         }
 
@@ -22,7 +23,6 @@ namespace Singular.Settings
         private ShamanHealSettings _battleground;
         private ShamanHealSettings _instance;
         private ShamanHealSettings _raid;
-        private ShamanHealSettings _normal;
 
         [Browsable(false)]
         public ShamanHealSettings Battleground { get { return _battleground ?? (_battleground = new ShamanHealSettings( HealingContext.Battlegrounds )); } }
@@ -34,18 +34,14 @@ namespace Singular.Settings
         public ShamanHealSettings Raid { get { return _raid ?? (_raid = new ShamanHealSettings(HealingContext.Raids)); } }
 
         [Browsable(false)]
-        public ShamanHealSettings Normal { get { return _normal ?? (_normal = new ShamanHealSettings(HealingContext.Normal)); } }
-
-        [Browsable(false)]
         public ShamanHealSettings Heal { get { return HealLookup(Singular.SingularRoutine.CurrentWoWContext); } }
         
         public ShamanHealSettings HealLookup( WoWContext ctx)
         {
-            if (ctx == WoWContext.Battlegrounds)
-                return Battleground;
             if (ctx == WoWContext.Instances)
                 return StyxWoW.Me.CurrentMap.IsRaid ? Raid : Instance;
-            return Normal;
+
+            return Battleground;
         }
 
         #endregion
@@ -81,6 +77,27 @@ namespace Singular.Settings
         [Description("True: Automatically select and apply weapon imbues, False: automatic cast of imbues prevented")]
         public bool UseWeaponImbues { get; set; }
 
+        [Setting]
+        [DefaultValue(15)]
+        [Category("Common")]
+        [DisplayName("Twist Water Shield Mana %")]
+        [Description("Water Shield if below this Mana %")]
+        public int TwistWaterShield { get; set; }
+
+
+        private int _TwistDamageShield;
+
+        [Setting]
+        [DefaultValue(25)]
+        [Category("Common")]
+        [DisplayName("Twist Lghtng/Earth Shield % Mana")]
+        [Description("Lightning (DPS) or Earth (Resto) Shield above this % Mana.  Note: muat be minimum of Water Shield % + 10")]
+        public int TwistDamageShield 
+        { 
+            get { return Math.Max( _TwistDamageShield, TwistWaterShield + 10); }
+            set { _TwistDamageShield = value; }
+        }
+
         #endregion
 
         #region Category: Enhancement
@@ -91,16 +108,62 @@ namespace Singular.Settings
         [Description("Selecet on what type of fight you would like to cast Feral Spirit")]
         public CastOn FeralSpiritCastOn  { get; set; }
 
+        [Setting]
+        [DefaultValue(75)]
+        [Category("Enhancement")]
+        [DisplayName("Maelstrom Healing Surge %")]
+        [Description("Health % to cast this ability at. Set to 100 to cast on cooldown, Set to 0 to disable.")]
+        public int MaelHealingSurge { get; set; }
+
+        [Setting]
+        [DefaultValue(false)]
+        [Category("Enhancement")]
+        [DisplayName("Disable Maelstrom DPS Casts")]
+        [Description("Disable Lightning Bolt, Chain Lightning, and Hex")]
+        public bool AvoidMaelstromDamage { get; set; }
+
+        [Setting]
+        [DefaultValue(35)]
+        [Category("Enhancement")]
+        [DisplayName("Maelstrom PVP Off-Heal %")]
+        [Description("Health % to cast this ability at. Set to 100 to cast on cooldown, Set to 0 to disable.")]
+        public int MaelPvpOffHeal { get; set; }
+
         #endregion
 
-        #region Category: Totems
+        #region Category: Self-Healing
 
         [Setting]
         [DefaultValue(85)]
-        [Category("Totems")]
+        [Category("Self-Heal")]
         [DisplayName("Healing Stream Totem %")]
-        [Description("Health % to cast this ability at. Set to 0 to disable.")]
-        public int HealHealingStreamTotem { get; set; }
+        [Description("Health % to cast this ability at. Set to 100 to cast on cooldown, Set to 0 to disable.")]
+        public int SelfHealingStreamTotem { get; set; }
+
+        [Setting]
+        [DefaultValue(40)]
+        [Category("Self-Heal")]
+        [DisplayName("Healing Surge %")]
+        [Description("Health % to cast this ability at. Set to 100 to cast on cooldown, Set to 0 to disable.")]
+        public int SelfHealingSurge { get; set; }
+
+        [Setting]
+        [DefaultValue(65)]
+        [Category("Self-Heal")]
+        [DisplayName("Ancestral Guidance %")]
+        [Description("Health % to cast this ability at. Set to 100 to cast on cooldown, Set to 0 to disable.")]
+        public int SelfAncestralGuidance { get; set; }
+
+        [Setting]
+        [DefaultValue(25)]
+        [Category("Self-Heal")]
+        [DisplayName("Ancestral Swiftness Heal %")]
+        [Description("Health % to cast this ability at. Set to 100 to cast on cooldown, Set to 0 to disable.")]
+        public int SelfAncestralSwiftnessHeal { get; set; }
+
+        #endregion
+
+        #region Category: Totems
 
         [Setting]
         [DefaultValue(80)]
@@ -234,13 +297,6 @@ namespace Singular.Settings
         public bool HealingSurgeAdjusted { get; set; }
 
         [Setting]
-        [DefaultValue(true)]
-        [Category("Global")]
-        [DisplayName("Use CDs")]
-        [Description("CDs")]
-        public bool UseCD { get; set; }
-
-        [Setting]
         [DefaultValue(70)]
         [Category("Restoration")]
         [DisplayName("% Healing Wave")]
@@ -351,6 +407,20 @@ namespace Singular.Settings
         [DisplayName("Ascendance Min Count")]
         [Description("Min number of players healed")]
         public int MinAscendanceCount { get; set; }
+
+        [Setting]
+        [DefaultValue(90)]
+        [Category("Restoration")]
+        [DisplayName("Telluric Cast Health %")]
+        [Description("Group Health % we can cast a Lightning Bolt")]
+        public int TelluricHealthCast { get; set; }
+
+        [Setting]
+        [DefaultValue(80)]
+        [Category("Restoration")]
+        [DisplayName("Telluric Cancel Health %")]
+        [Description("Group Health % where we cancel a Lightning Bolt in progress")]
+        public int TelluricHealthCancel { get; set; }
 
     }
 }

@@ -36,7 +36,7 @@ namespace Singular.ClassSpecific.Priest
             #region Avoidance 
 
                     new Decorator(
-                        ret => Unit.NearbyUnitsInCombatWithMe.Any(u => u.SpellDistance() < 8)
+                        ret => Unit.NearbyUnitsInCombatWithMeOrMyStuff.Any(u => u.SpellDistance() < 8)
                             && (SingularRoutine.CurrentWoWContext == WoWContext.Battlegrounds || (Me.GotTarget && Me.CurrentTarget.IsPlayer) || (SingularRoutine.CurrentWoWContext == WoWContext.Normal && (Me.HealthPercent < 50))),
                         CreatePriestAvoidanceBehavior()
                         )
@@ -57,10 +57,10 @@ namespace Singular.ClassSpecific.Priest
                     ret => !Spell.IsGlobalCooldown(),
                     new PrioritySelector(
                         PartyBuff.BuffGroup("Power Word: Fortitude"),
-                        //Spell.BuffSelf("Shadow Protection", ret => SingularSettings.Instance.Priest().UseShadowProtection && Unit.NearbyFriendlyPlayers.Any(u => !u.Dead && !u.IsGhost && (u.IsInMyPartyOrRaid || u.IsMe) && !Unit.HasAura(u, "Shadow Protection", 0))), // we no longer have Shadow resist
-                        Spell.BuffSelf("Inner Fire", ret => SingularSettings.Instance.Priest().UseInnerFire),
-                        Spell.BuffSelf("Inner Will", ret => !SingularSettings.Instance.Priest().UseInnerFire),
-                        Spell.BuffSelf("Fear Ward", ret => SingularSettings.Instance.Priest().UseFearWard),
+                        //Spell.BuffSelf("Shadow Protection", ret => PriestSettings.UseShadowProtection && Unit.NearbyFriendlyPlayers.Any(u => !u.Dead && !u.IsGhost && (u.IsInMyPartyOrRaid || u.IsMe) && !Unit.HasAura(u, "Shadow Protection", 0))), // we no longer have Shadow resist
+                        Spell.BuffSelf("Inner Fire", ret => PriestSettings.UseInnerFire),
+                        Spell.BuffSelf("Inner Will", ret => !PriestSettings.UseInnerFire),
+                        Spell.BuffSelf("Fear Ward", ret => PriestSettings.UseFearWard),
 
                         Spell.BuffSelf("Shadowform"),
 
@@ -95,7 +95,6 @@ namespace Singular.ClassSpecific.Priest
         {
             return new Decorator(
                 ret => MovementManager.IsClassMovementAllowed
-                    && PriestSettings.UseSpeedBuff 
                     && StyxWoW.Me.IsAlive
                     && !StyxWoW.Me.Mounted
                     && !StyxWoW.Me.IsOnTransport
@@ -124,7 +123,7 @@ namespace Singular.ClassSpecific.Priest
                                             ctx => StyxWoW.Me.Location,
                                             ret => true,
                                             false),
-                                        Helpers.Common.CreateWaitForLagDuration(orUntil => StyxWoW.Me.CurrentPendingCursorSpell != null),
+                                        Helpers.Common.CreateWaitForLagDuration(orUntil => Spell.GetPendingCursorSpell != null),
                                         new Action(ret => Lua.DoString("SpellStopTargeting()"))
                                         )
                                     )
@@ -135,42 +134,76 @@ namespace Singular.ClassSpecific.Priest
                 );
         }
 
-        public static Decorator CreatePriestMovementBuff(string mode, bool checkMoving = true)
+        public static WoWUnit GetBestTankTargetForPWS(float health = 100f)
         {
-            return new Decorator(
-                ret => MovementManager.IsClassMovementAllowed 
-                    && StyxWoW.Me.IsAlive 
-                    && (!checkMoving || StyxWoW.Me.IsMoving)
-                    && !StyxWoW.Me.Mounted
-                    && !StyxWoW.Me.IsOnTransport
-                    && !StyxWoW.Me.OnTaxi
-                    && (SpellManager.HasSpell("Angelic Feather") || TalentManager.IsSelected((int) PriestTalents.BodyAndSoul))
-                    && !StyxWoW.Me.HasAnyAura("Angelic Feather", "Body and Soul")
-                    && (BotPoi.Current == null || BotPoi.Current.Type == PoiType.None || BotPoi.Current.Location.Distance(StyxWoW.Me.Location) > 10)
-                    && !StyxWoW.Me.IsAboveTheGround(),
+            WoWUnit hotTarget = null;
+            string hotName = "Power Word: Shield";
+            string hotDebuff = "Weakened Soul";
 
-                new PrioritySelector(
-                    Spell.WaitForCast(),
-                    new Throttle( 3, 
-                        new Decorator(
-                            ret => !Spell.IsGlobalCooldown(),
-                            new PrioritySelector(
+            hotTarget = Group.Tanks.Where(u => u.IsAlive && u.Combat && u.HealthPercent < health && u.DistanceSqr < 40 * 40 && !u.HasAura(hotName) && !u.HasAura(hotDebuff) && u.InLineOfSpellSight).OrderBy(u => u.HealthPercent).FirstOrDefault();
+            if (hotTarget != null)
+                Logger.WriteDebug("GetBestTankTargetForPWS('{0}'): found tank {1} @ {2:F1}%", hotName, hotTarget.SafeName(), hotTarget.HealthPercent);
 
-                                Spell.BuffSelf( "Power Word: Shield", 
-                                    ret => TalentManager.IsSelected((int) PriestTalents.BodyAndSoul)
-                                        && !StyxWoW.Me.HasAnyAura("Body and Soul", "Weakened Soul")),
+            return hotTarget;
+        }
 
-                                new Decorator(
-                                    ret => SpellManager.HasSpell("Angelic Feather")
-                                        && !StyxWoW.Me.HasAura("Angelic Feather"),
-                                    new Sequence(
-                                        // new Action( ret => Logger.Write( "Speed Buff for {0}", mode ) ),
-                                        Spell.CastOnGround("Angelic Feather",
-                                            ctx => StyxWoW.Me.Location,
-                                            ret => true,
-                                            false),
-                                        Helpers.Common.CreateWaitForLagDuration( orUntil => StyxWoW.Me.CurrentPendingCursorSpell != null ),
-                                        new Action(ret => Lua.DoString("SpellStopTargeting()"))
+        public static Composite CreatePriestMovementBuff(string mode, bool checkMoving = true)
+        {
+            return new PrioritySelector(
+
+                new Throttle( 2,
+                    new Decorator(
+                        req => PriestSettings.UseSpeedBuffOnTank 
+                            && (HasTalent(PriestTalents.BodyAndSoul) || HasTalent(PriestTalents.AngelicFeather))
+                            && SingularRoutine.CurrentWoWContext == WoWContext.Instances,
+                        new PrioritySelector(
+                            ctx => Group.Tanks.FirstOrDefault( t => t.IsAlive && t.IsMoving && !t.Combat && !t.HasAnyAura("Body and Soul", "Angelic Feather") && t.SpellDistance() < 40),
+                            Spell.Buff("Power Word: Shield", on => (WoWUnit) on, req => HasTalent(PriestTalents.BodyAndSoul) && !((WoWUnit)req).HasAura("Weakened Soul")),
+                            new Sequence(
+                                Spell.CastOnGround("Angelic Feather", on => (WoWUnit) on, req => true, waitForSpell: false),
+                                Helpers.Common.CreateWaitForLagDuration(orUntil => Spell.GetPendingCursorSpell != null),
+                                new Action(ret => Lua.DoString("SpellStopTargeting()"))
+                                )
+                            )
+                        )
+                    ),
+
+                new Decorator(
+                    ret => MovementManager.IsClassMovementAllowed
+                        && PriestSettings.UseSpeedBuff
+                        && StyxWoW.Me.IsAlive 
+                        && (!checkMoving || StyxWoW.Me.IsMoving)
+                        && !StyxWoW.Me.Mounted
+                        && !StyxWoW.Me.IsOnTransport
+                        && !StyxWoW.Me.OnTaxi
+                        && (SpellManager.HasSpell("Angelic Feather") || TalentManager.IsSelected((int) PriestTalents.BodyAndSoul))
+                        && !StyxWoW.Me.HasAnyAura("Angelic Feather", "Body and Soul")
+                        && (BotPoi.Current == null || BotPoi.Current.Type == PoiType.None || BotPoi.Current.Location.Distance(StyxWoW.Me.Location) > 10)
+                        && !StyxWoW.Me.IsAboveTheGround(),
+
+                    new PrioritySelector(
+                        Spell.WaitForCast(),
+                        new Throttle( 3, 
+                            new Decorator(
+                                ret => !Spell.IsGlobalCooldown(),
+                                new PrioritySelector(
+
+                                    Spell.BuffSelf( "Power Word: Shield", 
+                                        ret => TalentManager.IsSelected((int) PriestTalents.BodyAndSoul)
+                                            && !StyxWoW.Me.HasAnyAura("Body and Soul", "Weakened Soul")),
+
+                                    new Decorator(
+                                        ret => SpellManager.HasSpell("Angelic Feather")
+                                            && !StyxWoW.Me.HasAura("Angelic Feather"),
+                                        new Sequence(
+                                            // new Action( ret => Logger.Write( "Speed Buff for {0}", mode ) ),
+                                            Spell.CastOnGround("Angelic Feather",
+                                                ctx => StyxWoW.Me.Location,
+                                                ret => true,
+                                                false),
+                                            Helpers.Common.CreateWaitForLagDuration( orUntil => Spell.GetPendingCursorSpell != null ),
+                                            new Action(ret => Lua.DoString("SpellStopTargeting()"))
+                                            )
                                         )
                                     )
                                 )
@@ -252,6 +285,32 @@ namespace Singular.ClassSpecific.Priest
                 );
         }
 
+        public static Composite CreateHolyFireBehavior()
+        {
+            if ( SpellManager.HasSpell( "Power Word: Solace"))
+                return Spell.Cast("Power Word: Solace", mov => false, on => Me.CurrentTarget, req => true, cancel => false);
+
+            return Spell.Cast("Holy Fire", mov => false, on => Me.CurrentTarget, req => true, cancel => false);
+        }
+
+        internal static Composite CreateFadeBehavior()
+        {
+            if (!PriestSettings.UseFade)
+                return new ActionAlwaysFail();
+
+            if (SingularRoutine.CurrentWoWContext == WoWContext.Instances)
+                return Spell.BuffSelf("Fade", req => Targeting.GetAggroOnMeWithin(StyxWoW.Me.Location, 30) > 0);
+
+            return Spell.BuffSelf("Fade", req => {
+                if (Targeting.Instance.TargetList.Any(p => p.IsPlayer && p.GotAlivePet && p.Pet.CurrentTargetGuid == Me.Guid))
+                    return true;
+
+                if (SingularRoutine.CurrentWoWContext == WoWContext.Battlegrounds)
+                    return Common.HasTalent(PriestTalents.Phantasm) && Me.HasAuraWithMechanic(WoWSpellMechanic.Snared);
+
+                return false;
+            });
+        }
     }
 
     public enum PriestTalents

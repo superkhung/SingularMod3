@@ -17,7 +17,8 @@ namespace Singular.ClassSpecific.Paladin
     public static class Holy
     {
         private static LocalPlayer Me { get { return StyxWoW.Me; } }
-        private static PaladinSettings Settings { get { return SingularSettings.Instance.Paladin(); } }
+        private static PaladinSettings PaladinSettings { get { return SingularSettings.Instance.Paladin(); } }
+        public static bool HasTalent(PaladinTalents tal) { return TalentManager.IsSelected((int)tal); }
 
         [Behavior(BehaviorType.Rest, WoWClass.Paladin, WoWSpec.PaladinHoly)]
         public static Composite CreatePaladinHolyRest()
@@ -41,8 +42,24 @@ namespace Singular.ClassSpecific.Paladin
         public static Composite CreatePaladinHolyHealBehavior()
         {
             return new PrioritySelector(
-                CreateRebirthBehavior(ctx => Group.Tanks.FirstOrDefault(t => !t.IsMe && t.IsDead) ?? Group.Healers.FirstOrDefault(h => !h.IsMe && h.IsDead)),
-                CreatePaladinHealBehavior()
+                Spell.BuffSelf( "Devotion Aura", req => Me.Silenced ),
+                CreateRebirthBehavior(),
+                CreatePaladinHealBehavior(),
+                new Decorator(
+                    req => !Unit.NearbyGroupMembers.Any(m => m.IsAlive && !m.IsMe),
+                    new PrioritySelector(
+                        Spell.Cast("Lay on Hands",
+                            mov => false,
+                            on => Me,
+                            req => Me.GetPredictedHealthPercent(true) <= PaladinSettings.SelfLayOnHandsHealth),
+                        Common.CreateWordOfGloryBehavior(on => Me),
+                        Spell.Cast("Flash of Light",
+                            mov => true,
+                            on => Me,
+                            req => Me.GetPredictedHealthPercent(true) <= PaladinSettings.SelfFlashOfLightHealth,
+                            cancel => Me.HealthPercent > PaladinSettings.SelfFlashOfLightHealth)
+                        )
+                    )
                 );
         }
         [Behavior(BehaviorType.CombatBuffs, WoWClass.Paladin, WoWSpec.PaladinHoly)]
@@ -60,12 +77,9 @@ namespace Singular.ClassSpecific.Paladin
         {
             return new PrioritySelector(
                 new Decorator(
-                    ret => Unit.NearbyFriendlyPlayers.Count(u => u.IsInMyPartyOrRaid) == 0,
+                    ret => !Unit.NearbyGroupMembers.Any(m => m.IsAlive && !m.IsMe),
                     new PrioritySelector(
-                        Safers.EnsureTarget(),
-                        Movement.CreateMoveToLosBehavior(),
-                        Movement.CreateFaceTargetBehavior(),
-                        Helpers.Common.CreateDismount("Combat"),
+                        Helpers.Common.EnsureReadyToAttackFromMelee(),
                         Spell.WaitForCastOrChannel(),
 
                         new Decorator( 
@@ -73,7 +87,7 @@ namespace Singular.ClassSpecific.Paladin
                             new PrioritySelector(
                                 Helpers.Common.CreateAutoAttack(true),
                                 Helpers.Common.CreateInterruptBehavior(),
-                                Spell.Cast("Hammer of Justice", ret => Settings.StunMobsWhileSolo && SingularRoutine.CurrentWoWContext == WoWContext.Normal),
+                                Spell.Cast("Hammer of Justice", ret => PaladinSettings.StunMobsWhileSolo && SingularRoutine.CurrentWoWContext == WoWContext.Normal),
                                 Spell.Buff("Judgment"),
                                 Spell.Cast("Hammer of Wrath"),
                                 Spell.Cast("Holy Shock"),
@@ -82,7 +96,7 @@ namespace Singular.ClassSpecific.Paladin
                                 )
                             ),
 
-                        Movement.CreateMoveToTargetBehavior(true, 5f)
+                        Movement.CreateMoveToMeleeBehavior(true)
                         )
                     )
                 );
@@ -94,12 +108,10 @@ namespace Singular.ClassSpecific.Paladin
                 new Decorator(
                     ret => !StyxWoW.Me.GroupInfo.IsInParty && !StyxWoW.Me.GroupInfo.IsInRaid,
                     new PrioritySelector(
-                        Movement.CreateMoveToLosBehavior(),
-                        Movement.CreateFaceTargetBehavior(),
-                        Helpers.Common.CreateDismount("Pulling"),
+                        Helpers.Common.EnsureReadyToAttackFromMelee(),
                         Spell.Cast("Judgment"),
                         Helpers.Common.CreateAutoAttack(true),
-                        Movement.CreateMoveToTargetBehavior(true, 5f)
+                        Movement.CreateMoveToMeleeBehavior(true)
                         ))
                 );
         }
@@ -114,37 +126,27 @@ namespace Singular.ClassSpecific.Paladin
             return CreatePaladinHealBehavior(selfOnly, false);
         }
 
+        private static WoWUnit _healTarget;
+
         internal static Composite CreatePaladinHealBehavior(bool selfOnly, bool moveInRange)
         {
             HealerManager.NeedHealTargeting = true;
 
             return
                 new PrioritySelector(
-                    ctx => selfOnly ? StyxWoW.Me : HealerManager.Instance.FirstUnit,
+                    ctx => _healTarget = (selfOnly ? StyxWoW.Me : HealerManager.Instance.FirstUnit),
                     new Decorator(
-                    ret => ret != null && (moveInRange || ((WoWUnit)ret).InLineOfSpellSight && ((WoWUnit)ret).DistanceSqr < 40 * 40),
+                        ret => ret != null && (moveInRange || ((WoWUnit)ret).InLineOfSpellSight && ((WoWUnit)ret).DistanceSqr < 40 * 40),
                         new PrioritySelector(
                             Spell.WaitForCast(),
                             new Decorator(
                                 ret => moveInRange,
                                 Movement.CreateMoveToLosBehavior(ret => (WoWUnit)ret)),
+
                             Spell.Cast(
                                 "Beacon of Light",
                                 ret => (WoWUnit)ret,
                                 ret => ret is WoWPlayer && Group.Tanks.Contains((WoWPlayer)ret) && Group.Tanks.All(t => !t.HasMyAura("Beacon of Light"))),
-
-
-
-                                //Try and keep it up if requested
-                             Spell.Cast(
-                                "Eternal Flame",
-                                ret => (WoWUnit)ret,
-                               ret => ret is WoWPlayer && SingularSettings.Instance.Paladin().KeepEternalFlameUp && Group.Tanks.Contains((WoWPlayer)ret) && Group.Tanks.All(t => !t.HasMyAura("Eternal Flame"))),
-
-                            Spell.Cast(
-                                "Eternal Flame",
-                                ret => (WoWUnit)ret,
-                               ret => StyxWoW.Me.CurrentHolyPower >= 3 && (((WoWUnit)ret).HealthPercent <= SingularSettings.Instance.Paladin().WordOfGloryHealth)),
 
                            Spell.Cast(
                                 "Lay on Hands",
@@ -158,10 +160,9 @@ namespace Singular.ClassSpecific.Paladin
                                        Unit.NearbyFriendlyPlayers.Count(p =>
                                            p.HealthPercent <= SingularSettings.Instance.Paladin().LightOfDawnHealth && p != StyxWoW.Me &&
                                            p.DistanceSqr < 30 * 30 && StyxWoW.Me.IsSafelyFacing(p.Location)) >= SingularSettings.Instance.Paladin().LightOfDawnCount),
-                            Spell.Cast(
-                                "Word of Glory",
-                                ret => (WoWUnit)ret,
-                                ret => StyxWoW.Me.CurrentHolyPower >= 3 && ((WoWUnit)ret).HealthPercent <= SingularSettings.Instance.Paladin().WordOfGloryHealth),
+
+                            Common.CreateWordOfGloryBehavior( on => (WoWUnit) on ),
+
                             Spell.Cast(
                                 "Holy Shock",
                                 ret => (WoWUnit)ret,
@@ -181,51 +182,33 @@ namespace Singular.ClassSpecific.Paladin
                             new Decorator(
                                 ret => StyxWoW.Me.Combat && StyxWoW.Me.GotTarget && Unit.NearbyFriendlyPlayers.Count(u => u.IsInMyPartyOrRaid) == 0,
                                 new PrioritySelector(
-                                    Movement.CreateMoveToLosBehavior(),
-                                    Movement.CreateFaceTargetBehavior(),
-                                    Helpers.Common.CreateAutoAttack(true),
+                                    Helpers.Common.EnsureReadyToAttackFromMelee(),
                                     Helpers.Common.CreateInterruptBehavior(),
                                     Spell.Buff("Judgment"),
                                     Spell.Cast("Hammer of Wrath"),
                                     Spell.Cast("Holy Shock"),
                                     Spell.Cast("Crusader Strike"),
                                     Spell.Cast("Denounce"),
-                                    Movement.CreateMoveToTargetBehavior(true, 5f)
-                                    )),
+                                    Movement.CreateMoveToMeleeBehavior(true)
+                                    )
+                                ),
                             new Decorator(
                                 ret => moveInRange,
                 // Get in range
-                                Movement.CreateMoveToTargetBehavior(true, 35f, ret => (WoWUnit)ret))
-                            )));
-        }
-
-        public static Composite CreateRebirthBehavior(UnitSelectionDelegate onUnit)
-        {
-            if (!Settings.UseRebirth)
-                return new PrioritySelector();
-
-            if (onUnit == null)
-            {
-                Logger.WriteDebug("CreateRebirthBehavior: error - onUnit == null");
-                return new PrioritySelector();
-            }
-
-            return new Decorator(
-                ret => Me.HasAura("Symbiosis"),
-                new PrioritySelector(
-                    ctx => onUnit(ctx),
-                    new Decorator(
-                        ret => ((WoWUnit)ret) != null && Spell.GetSpellCooldown("Rebirth") == TimeSpan.Zero,
-                        new PrioritySelector(
-                            Spell.WaitForCast(true),
-                            Movement.CreateMoveToRangeAndStopBehavior(ret => (WoWUnit)ret, range => 40f),
-                            new Decorator(
-                                ret => !Spell.IsGlobalCooldown(),
-                                Spell.Cast("Rebirth", ret => (WoWUnit)ret)
+                                Movement.CreateMoveToUnitBehavior( on => _healTarget, 35f, 30f)
                                 )
                             )
                         )
-                    )
+                    );
+        }
+
+        private static WoWUnit _rebirthTarget;
+
+        public static Composite CreateRebirthBehavior()
+        {
+            return new Decorator(
+                ret => Me.HasAura("Symbiosis"),
+                Helpers.Common.CreateCombatRezBehavior("Rebirth", filter => true, requirements => true)
                 );
         }
     }

@@ -26,11 +26,10 @@ namespace Singular.ClassSpecific.DeathKnight
         public static Composite CreateDeathKnightUnholyNormalCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
 
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
                 Spell.WaitForCastOrChannel(),
+
 
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown(),
@@ -49,13 +48,13 @@ namespace Singular.ClassSpecific.DeathKnight
                         Spell.BuffSelf("Unholy Frenzy",
                             ret => Me.CurrentTarget.IsWithinMeleeRange 
                                 && !PartyBuff.WeHaveBloodlust
-                                && Common.UseLongCoolDownAbility),
+                                && Helpers.Common.UseLongCoolDownAbility),
 
-                        Spell.Cast("Summon Gargoyle", ret => DeathKnightSettings.UseSummonGargoyle && Common.UseLongCoolDownAbility),
+                        Spell.Cast("Summon Gargoyle", ret => DeathKnightSettings.UseSummonGargoyle && Helpers.Common.UseLongCoolDownAbility),
 
                         // aoe
                         new Decorator(
-                            ret => Unit.UnfriendlyUnitsNearTarget(12f).Count() >= DeathKnightSettings.DeathAndDecayCount,
+                            ret => Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(12f).Count() >= DeathKnightSettings.DeathAndDecayCount,
                             new PrioritySelector(
                                 // Spell.Cast("Gorefiend's Grasp"),
                                 Spell.Cast("Remorseless Winter"),
@@ -81,7 +80,8 @@ namespace Singular.ClassSpecific.DeathKnight
 
                         Spell.CastOnGround("Death and Decay",
                             ret => StyxWoW.Me.CurrentTarget.Location,
-                            ret => StyxWoW.Me.UnholyRuneCount == 2 || StyxWoW.Me.DeathRuneCount > 0, false),
+                            ret => Spell.UseAOE && (StyxWoW.Me.UnholyRuneCount == 2 || StyxWoW.Me.DeathRuneCount > 0), 
+                            false),
 
                         Spell.Cast("Blood Tap"),
 
@@ -166,11 +166,10 @@ namespace Singular.ClassSpecific.DeathKnight
         public static Composite CreateDeathKnightUnholyPvPCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
 
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
                 Spell.WaitForCastOrChannel(),
+
 
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown(),
@@ -190,9 +189,9 @@ namespace Singular.ClassSpecific.DeathKnight
                                        ret =>
                                        StyxWoW.Me.CurrentTarget.IsWithinMeleeRange &&
                                        !PartyBuff.WeHaveBloodlust &&
-                                       Common.UseLongCoolDownAbility),
+                                       Helpers.Common.UseLongCoolDownAbility),
                         Spell.Cast("Summon Gargoyle",
-                            ret => DeathKnightSettings.UseSummonGargoyle && Common.UseLongCoolDownAbility),
+                            ret => DeathKnightSettings.UseSummonGargoyle && Helpers.Common.UseLongCoolDownAbility),
 
 
                         // *** Single target rotation. ***
@@ -209,8 +208,7 @@ namespace Singular.ClassSpecific.DeathKnight
                         Spell.Cast("Dark Transformation",
                                    ret => StyxWoW.Me.GotAlivePet &&
                                           !StyxWoW.Me.Pet.ActiveAuras.ContainsKey("Dark Transformation") &&
-                                          StyxWoW.Me.HasAura("Shadow Infusion") &&
-                                          StyxWoW.Me.Auras["Shadow Infusion"].StackCount >= 5),
+                                          StyxWoW.Me.HasAura("Shadow Infusion", 5)),
                         Spell.CastOnGround("Death and Decay",
                                            ret => StyxWoW.Me.CurrentTarget.Location,
                                            ret => StyxWoW.Me.UnholyRuneCount == 2 || StyxWoW.Me.DeathRuneCount > 0, false),
@@ -240,9 +238,8 @@ namespace Singular.ClassSpecific.DeathKnight
         public static Composite CreateDeathKnightUnholyInstanceCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
+
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
                 Spell.WaitForCastOrChannel(),
 
                 new Decorator(
@@ -259,22 +256,22 @@ namespace Singular.ClassSpecific.DeathKnight
                                        ret =>
                                        StyxWoW.Me.CurrentTarget.IsWithinMeleeRange &&
                                        !PartyBuff.WeHaveBloodlust &&
-                                       Common.UseLongCoolDownAbility),
+                                       Helpers.Common.UseLongCoolDownAbility),
                         Spell.Cast("Summon Gargoyle",
                                    ret =>
-                                   DeathKnightSettings.UseSummonGargoyle && Common.UseLongCoolDownAbility),
+                                   DeathKnightSettings.UseSummonGargoyle && Helpers.Common.UseLongCoolDownAbility),
 
                         // Start AoE section
                         new Decorator(
                             ret =>
-                            Spell.UseAOE && DeathKnightSettings.UseAoeInInstance && Unit.UnfriendlyUnitsNearTarget(12f).Count() >= DeathKnightSettings.DeathAndDecayCount,
+                            Spell.UseAOE && Unit.UnfriendlyUnitsNearTarget(12f).Count() >= DeathKnightSettings.DeathAndDecayCount,
                             new PrioritySelector(
                                 // Diseases
                                 Common.CreateApplyDiseases(),
 
                                 // spread the disease around.
                                 Spell.Cast("Blood Boil",
-                                    ret => TalentManager.IsSelected((int) DeathKnightTalents.RollingBlood) 
+                                    ret => Common.HasTalent(DeathKnightTalents.RollingBlood) 
                                         && !StyxWoW.Me.HasAura("Unholy Blight") 
                                         && StyxWoW.Me.CurrentTarget.DistanceSqr <= 10*10 && Common.ShouldSpreadDiseases),
                                 Spell.Cast("Pestilence",
@@ -287,7 +284,8 @@ namespace Singular.ClassSpecific.DeathKnight
 
                                 Spell.CastOnGround("Death and Decay",
                                     loc => StyxWoW.Me.CurrentTarget.Location,
-                                    req => StyxWoW.Me.UnholyRuneCount == 2, false),
+                                    req => Spell.UseAOE && StyxWoW.Me.UnholyRuneCount == 2, 
+                                    false),
 
                                 Spell.Cast("Blood Boil",
                                     ret => StyxWoW.Me.CurrentTarget.DistanceSqr <= 10*10 && StyxWoW.Me.DeathRuneCount > 0 

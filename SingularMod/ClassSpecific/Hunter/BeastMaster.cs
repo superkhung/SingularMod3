@@ -32,13 +32,7 @@ namespace Singular.ClassSpecific.Hunter
         {
             return new PrioritySelector(
 
-                Safers.EnsureTarget(),
-
-                //Common.CreateHunterBackPedal(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
                     
                 Spell.WaitForCastOrChannel(),
             
@@ -76,10 +70,11 @@ namespace Singular.ClassSpecific.Hunter
 
                         // AoE Rotation
                         new Decorator(
-                            ret => Spell.UseAOE && !(Me.CurrentTarget.IsBoss() || Me.CurrentTarget.IsPlayer) && Unit.UnfriendlyUnitsNearTarget(8f).Count() >= 3,
+                            ret => Spell.UseAOE && Me.GotTarget && !(Me.CurrentTarget.IsBoss() || Me.CurrentTarget.IsPlayer) && Unit.UnfriendlyUnitsNearTarget(8f).Count() >= 3,
                             new PrioritySelector(
-                                Spell.Cast( "Multi-Shot", ctx => Clusters.GetBestUnitForCluster( Unit.NearbyUnfriendlyUnits.Where( u => u.Distance < 40 && u.InLineOfSpellSight && Me.IsSafelyFacing(u)), ClusterType.Radius, 8f)),
-                                Spell.Cast( "Kill Shot", onUnit => Unit.NearbyUnfriendlyUnits.FirstOrDefault(u => u.HealthPercent < 20 && u.Distance < 40 && u.InLineOfSpellSight && Me.IsSafelyFacing(u))),
+                                Spell.Cast("Kill Shot", onUnit => Unit.NearbyUnfriendlyUnits.FirstOrDefault(u => u.HealthPercent < 20 && u.Distance < 40 && u.InLineOfSpellSight && Me.IsSafelyFacing(u))),
+                                Common.CreateHunterTrapBehavior("Explosive Trap", true, on => Me.CurrentTarget, ret => true),
+                                Spell.Cast("Multi-Shot", ctx => Clusters.GetBestUnitForCluster(Unit.NearbyUnfriendlyUnits.Where(u => u.Distance < 40 && u.InLineOfSpellSight && Me.IsSafelyFacing(u)), ClusterType.Radius, 8f)),
                                 Spell.Cast( "Cobra Shot"),
                                 Common.CastSteadyShot(on => Me.CurrentTarget, ret => !SpellManager.HasSpell("Cobra Shot"))
                                 )
@@ -87,17 +82,15 @@ namespace Singular.ClassSpecific.Hunter
 
                         // Single Target Rotation
                         Spell.Buff("Serpent Sting"),
-                        Spell.Cast("Kill Command", ctx => Me.GotAlivePet && Pet.GotTarget && Pet.Location.Distance(Pet.CurrentTarget.Location) < 25f),
                         Spell.Cast("Kill Shot", ctx => Me.CurrentTarget.HealthPercent < 20),
+                        Spell.Cast("Kill Command", ctx => Me.GotAlivePet && Pet.GotTarget && Pet.Location.Distance(Pet.CurrentTarget.Location) < 25f),
                         Spell.BuffSelf("Focus Fire", ctx => Me.HasAura("Frenzy", 5) && !Me.HasAura("The Beast Within")),
 
                         Spell.Cast("Arcane Shot", ret => Me.CurrentFocus > 50 || Me.HasAnyAura("Thrill of the Hunt", "The Beast Within")),
                         Spell.Cast("Cobra Shot"),
                         Common.CastSteadyShot( on => Me.CurrentTarget, ret => !SpellManager.HasSpell("Cobra Shot"))
                         )
-                    ),
-
-                Movement.CreateMoveToTargetBehavior(true, 35f)
+                    )
                 );
         }
 
@@ -110,13 +103,7 @@ namespace Singular.ClassSpecific.Hunter
         {
             return new PrioritySelector(
 
-                Safers.EnsureTarget(),
-
-                //Common.CreateHunterBackPedal(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
                 Spell.WaitForCastOrChannel(),
 
@@ -150,6 +137,9 @@ namespace Singular.ClassSpecific.Hunter
                                 && Me.GotAlivePet
                                 && (!Me.CurrentTarget.GotTarget || Me.CurrentTarget.CurrentTarget == Me)),
 
+                        // snipe kills if possible
+                        Spell.Cast("Kill Shot", onUnit => Unit.NearbyUnfriendlyUnits.FirstOrDefault(u => u.HealthPercent < 5 && u.Distance < 40 && u.InLineOfSpellSight && Me.IsSafelyFacing(u))),
+
                         Spell.Cast("Kill Shot", ctx => Me.CurrentTarget.HealthPercent < 20),
 
                         // Single Target Rotation (no AoE in PVP)
@@ -169,7 +159,7 @@ namespace Singular.ClassSpecific.Hunter
                         )
                     ),
 
-                Movement.CreateMoveToTargetBehavior(true, 35f)
+                Movement.CreateMoveToUnitBehavior( on => StyxWoW.Me.CurrentTarget, 35f, 30f)
                 );
         }
 

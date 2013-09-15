@@ -56,10 +56,9 @@ namespace Singular.ClassSpecific.Paladin
         public static Composite CreatePaladinCombatBuffs()
         {
             return new PrioritySelector(
-                Spell.WaitForCastOrChannel(),
-
+                Spell.BuffSelf("Devotion Aura", req => Me.Silenced),
                 new Decorator(
-                    ret => !Spell.IsGlobalCooldown(),
+                    req => !Unit.IsTrivial(Me.CurrentTarget),
                     new PrioritySelector(
                         Spell.Cast("Repentance", 
                             onUnit => 
@@ -70,7 +69,8 @@ namespace Singular.ClassSpecific.Paladin
                                     && !u.IsCrowdControlled()
                                     && u.Distance.Between(10, 30) && Me.IsSafelyFacing(u) && u.InLineOfSpellSight && (!Me.GotTarget || u.Location.Distance(Me.CurrentTarget.Location) > 10))
                             .OrderByDescending(u => u.Distance)
-                            .FirstOrDefault())
+                            .FirstOrDefault()
+                            )
                         )
                     )
                 );
@@ -87,7 +87,7 @@ namespace Singular.ClassSpecific.Paladin
         {
             return
                 new PrioritySelector(
-                    /*
+
                         PartyBuff.BuffGroup( 
                             "Blessing of Kings", 
                             ret => PaladinSettings.Blessings == PaladinBlessings.Auto || PaladinSettings.Blessings == PaladinBlessings.Kings,
@@ -96,7 +96,7 @@ namespace Singular.ClassSpecific.Paladin
                         PartyBuff.BuffGroup(
                             "Blessing of Might",
                             ret => PaladinSettings.Blessings == PaladinBlessings.Auto || PaladinSettings.Blessings == PaladinBlessings.Might, 
-                            "Blessing of Kings")*/
+                            "Blessing of Kings")
                     );
         }
 
@@ -112,7 +112,7 @@ namespace Singular.ClassSpecific.Paladin
                     new Decorator(
                         ret => _seal != PaladinSeal.None
                             && !Me.HasMyAura(SealSpell(_seal))
-                            && SpellManager.CanCast(SealSpell(_seal), Me),
+                            && Spell.CanCastHack(SealSpell(_seal), Me),
                         Spell.Cast( s => SealSpell(_seal), on => Me, ret => !Me.HasAura(SealSpell(_seal)))
                         )
                     )
@@ -162,7 +162,7 @@ namespace Singular.ClassSpecific.Paladin
                             bestSeal = Settings.PaladinSeal.Insight;
                         else if (SingularRoutine.CurrentWoWContext == WoWContext.Battlegrounds)
                             bestSeal = Settings.PaladinSeal.Truth;
-                        else if (Unit.NearbyUnfriendlyUnits.Count(u => u.Distance <= 8) >= 8)
+                        else if (Unit.NearbyUnfriendlyUnits.Count(u => u.Distance <= 8) >= 4)
                             bestSeal = Settings.PaladinSeal.Righteousness;
                         break;
                 }
@@ -175,6 +175,40 @@ namespace Singular.ClassSpecific.Paladin
                 bestSeal = Settings.PaladinSeal.Truth;
 
             return bestSeal;
+        }
+
+        public static Composite CreateWordOfGloryBehavior(UnitSelectionDelegate onUnit )
+        {
+            if ( HasTalent( PaladinTalents.EternalFlame ))
+            {
+                return new PrioritySelector(
+                    Spell.Cast(
+                        "Eternal Flame",
+                        onUnit,
+                        ret => onUnit(ret) is WoWPlayer && PaladinSettings.KeepEternalFlameUp && Group.Tanks.Contains((WoWPlayer)onUnit(ret)) && !Group.Tanks.Any(t => t.HasMyAura("Eternal Flame"))),
+
+                    Spell.Cast(
+                        "Eternal Flame",
+                        ret => (WoWUnit)ret,
+                        ret => StyxWoW.Me.CurrentHolyPower >= 3 && (((WoWUnit)ret).HealthPercent <= SingularSettings.Instance.Paladin().SelfEternalFlameHealth ))
+
+                    );
+            }
+
+            return new PrioritySelector(
+                new Decorator(
+                    req => Me.CurrentHolyPower >= 1 && Me.HealthPercent <= PaladinSettings.SelfWordOfGloryHealth1 || Me.ActiveAuras.ContainsKey("Divine Purpose"),
+                    Spell.Cast("Word of Glory", onUnit)
+                    ),
+                new Decorator(
+                    req => Me.CurrentHolyPower >= 2 && Me.HealthPercent <= PaladinSettings.SelfWordOfGloryHealth2,
+                    Spell.Cast("Word of Glory", onUnit)
+                    ),
+                new Decorator(
+                    req => Me.CurrentHolyPower >= 3 && Me.HealthPercent <= PaladinSettings.SelfWordOfGloryHealth3,
+                    Spell.Cast("Word of Glory", onUnit)
+                    )
+                );
         }
 
         public static bool HasTalent(PaladinTalents tal)

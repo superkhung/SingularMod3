@@ -29,41 +29,40 @@ namespace Singular.ClassSpecific.Warlock
         private static int _mobCount;
         public static readonly WaitTimer demonFormRestTimer = new WaitTimer(TimeSpan.FromSeconds(3));
 
+
         #region Normal Rotation
 
-        [Behavior(BehaviorType.Pull|BehaviorType.Combat, WoWClass.Warlock, WoWSpec.WarlockDemonology, WoWContext.All)]
+        [Behavior(BehaviorType.Pull | BehaviorType.Combat, WoWClass.Warlock, WoWSpec.WarlockDemonology, WoWContext.All)]
         public static Composite CreateWarlockDemonologyNormalCombat()
         {
             Kite.CreateKitingBehavior(CreateSlowMeleeBehavior(), null, null);
 
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
-                Spell.WaitForCast(true),
+                Spell.WaitForCast(FaceDuring.Yes),
 
                 new Decorator(ret => !Spell.IsGlobalCooldown(),
                     new PrioritySelector(
 
                         // calculate key values
-                        new Action( ret => {
+                        new Action(ret =>
+                        {
                             Me.CurrentTarget.TimeToDeath();
-                            _mobCount = Common.TargetsInCombat.Where(t=>t.Distance <= (Me.MeleeDistance(t) + 3)).Count();
+                            _mobCount = Common.TargetsInCombat.Where(t => t.Distance <= (Me.MeleeDistance(t) + 3)).Count();
                             return RunStatus.Failure;
-                            }),
+                        }),
 
-                        CreateWarlockDiagnosticOutputBehavior(),
+                        CreateWarlockDiagnosticOutputBehavior(Dynamics.CompositeBuilder.CurrentBehaviorType.ToString()),
 
                         Helpers.Common.CreateAutoAttack(true),
                         new Decorator(
                             ret => Me.GotAlivePet && Me.GotTarget && Me.Pet.CurrentTarget != Me.CurrentTarget,
-                            new Action( ret => {
+                            new Action(ret =>
+                            {
                                 PetManager.CastPetAction("Attack");
                                 return RunStatus.Failure;
-                                })
+                            })
                             ),
 
                         Helpers.Common.CreateInterruptBehavior(),
@@ -73,8 +72,8 @@ namespace Singular.ClassSpecific.Warlock
                             ret => Spell.UseAOE && Common.GetCurrentPet() == WarlockPet.Felguard,
                             new Sequence(
                                 new PrioritySelector(
-                                    Pet.CreateCastPetAction("Felstorm", ret => !Common.HasTalent( WarlockTalents.GrimoireOfSupremacy )),
-                                    Pet.CreateCastPetAction("Wrathtorm", ret => Common.HasTalent( WarlockTalents.GrimoireOfSupremacy ))
+                                    Pet.CreateCastPetAction("Felstorm", ret => !Common.HasTalent(WarlockTalents.GrimoireOfSupremacy)),
+                                    Pet.CreateCastPetAction("Wrathstorm", ret => Common.HasTalent(WarlockTalents.GrimoireOfSupremacy))
                                     ),
                                 new ActionAlwaysFail()  // no GCD on Felstorm, allow to fall through
                                 )
@@ -82,39 +81,54 @@ namespace Singular.ClassSpecific.Warlock
 
                         new Decorator(
                             ret => MovementManager.IsClassMovementAllowed
-                                && WarlockSettings.UseDemonicLeap 
+                                && WarlockSettings.UseDemonicLeap
                                 && ((Me.HealthPercent < 50 && SingularRoutine.CurrentWoWContext == WoWContext.Normal) || SingularRoutine.CurrentWoWContext == WoWContext.Battlegrounds)
-                                && Unit.NearbyUnitsInCombatWithMe.Any(u => u.IsWithinMeleeRange),
+                                && Unit.NearbyUnitsInCombatWithMeOrMyStuff.Any(u => u.IsWithinMeleeRange),
                             new PrioritySelector(
-                                Spell.Cast( "Carrion Swarm", req => Me.HasAura( "Metamorphosis")),
+                                Spell.Cast("Carrion Swarm", req => Me.HasAura("Metamorphosis")),
                                 Disengage.CreateDisengageBehavior("Demonic Leap", Disengage.Direction.Frontwards, 20, CreateSlowMeleeBehavior())
                                 )
                             ),
 
             #region Felguard Use
 
-                        new Decorator(
-                            ret => Common.GetCurrentPet() == WarlockPet.Felguard && Me.CurrentTarget.Fleeing,
+ new Decorator(
+                            ret => Common.GetCurrentPet() == WarlockPet.Felguard && Me.GotTarget && Me.CurrentTarget.Fleeing,
                             Pet.CreateCastPetAction("Axe Toss")
                             ),
 
             #endregion
 
-            #region Apply Metamorphosis
+
+            #region CurrentTarget DoTs
+
+                // check two main DoTs so we cast based upon current state before we look at entering/leaving Metamorphosis
+                        Spell.Cast("Corruption", req => !Me.HasAura("Metamorphosis") && Me.CurrentTarget.HasAuraExpired("Corruption", 3)),
+                        new Throttle(1,
+                            new Sequence(
+                                Spell.CastHack("Metamorphosis: Doom", "Doom", on => Me.CurrentTarget, req => Me.HasAura("Metamorphosis") && (Me.CurrentTarget.HasAuraExpired("Metamorphosis: Doom", "Doom", 10) && DoesCurrentTargetDeserveToGetDoom()) || NeedToReapplyDoom()),
+                                new WaitContinue(TimeSpan.FromMilliseconds(350), canRun => Me.CurrentTarget.HasAura("Doom"), new ActionAlwaysSucceed())
+                                )
+                            ),
+
+            #endregion
+
+            #region Enter/Exit Metamorphosis based upon needs and fury levels
 
                 // manage metamorphosis. don't use Spell.Cast family so we can manage the use of CanCast()
                         new Decorator(
                             ret => NeedToApplyMetamorphosis(),
                             new Sequence(
-                                new Action( ret => Logger.Write( Color.White, "^Applying Metamorphosis Buff")),
-                                new Action( ret => SpellManager.Cast("Metamorphosis", Me)),
-                                new WaitContinue( 
-                                    TimeSpan.FromMilliseconds(450), 
-                                    canRun => Me.HasAura("Metamorphosis"), 
-                                    new Action( r => {
+                                new Action(ret => Logger.Write(Color.White, "^Applying Metamorphosis Buff")),
+                                new Action(ret => SpellManager.Cast("Metamorphosis", Me)),
+                                new WaitContinue(
+                                    TimeSpan.FromMilliseconds(450),
+                                    canRun => Me.HasAura("Metamorphosis"),
+                                    new Action(r =>
+                                    {
                                         demonFormRestTimer.Reset();
                                         return RunStatus.Success;
-                                        })
+                                    })
                                     )
                                 )
                             ),
@@ -122,9 +136,9 @@ namespace Singular.ClassSpecific.Warlock
                         new Decorator(
                             ret => NeedToCancelMetamorphosis(),
                             new Sequence(
-                                new Action(ret => Logger.Write( Color.White, "^Cancel Metamorphosis Buff")),
-                                // new Action(ret => Lua.DoString("CancelUnitBuff(\"player\",\"Metamorphosis\");")),
-                                new Action( ret => Me.CancelAura( "Metamorphosis")),
+                                new Action(ret => Logger.Write(Color.White, "^Cancel Metamorphosis Buff")),
+                // new Action(ret => Lua.DoString("CancelUnitBuff(\"player\",\"Metamorphosis\");")),
+                                new Action(ret => Me.CancelAura("Metamorphosis")),
                                 new WaitContinue(TimeSpan.FromMilliseconds(450), canRun => !Me.HasAura("Metamorphosis"), new ActionAlwaysSucceed())
                                 )
                             ),
@@ -132,43 +146,62 @@ namespace Singular.ClassSpecific.Warlock
 
             #region AOE
 
-                        // must appear after Mob count and Metamorphosis handling
+                // must appear after Mob count and Metamorphosis handling
                         CreateDemonologyAoeBehavior(),
 
             #endregion
 
             #region Single Target
 
+                        new Throttle( TimeSpan.FromMilliseconds(2400), Spell.Cast("Soul Fire", mov => true, on => Me.CurrentTarget, req => Me.HasAura("Molten Core"), cancel => false)),
+
                         new Decorator(
-                            ret => Me.HasAura( "Metamorphosis"),
+                            ret => Me.HasAura("Metamorphosis"),
                             new PrioritySelector(
-                                new Sequence(
-                                    Spell.CastHack( "Metamorphosis: Doom", "Doom", on => Me.CurrentTarget, req => Me.CurrentTarget.HasAuraExpired("Metamorphosis: Doom", "Doom", 10) && DoesCurrentTargetDeserveToGetDoom()),
-                                    new WaitContinue(TimeSpan.FromMilliseconds(250), canRun => Me.CurrentTarget.HasAura("Doom"), new ActionAlwaysSucceed())
-                                    ),
-                                Spell.Cast("Soul Fire", ret => Me.HasAura("Molten Core")),
                                 Spell.CastHack("Metamorphosis: Touch of Chaos", "Touch of Chaos", on => Me.CurrentTarget, req => true),
-                                Spell.Cast("Soul Fire", ret => !SpellManager.HasSpell("Metamorphosis: Touch of Chaos"))
+                                Spell.Cast("Soul Fire", ret => Me.Level < 25 /* dont know Touch of Chaos -or- Shadow Bolt */ ),
+                                Spell.Cast("Shadow Bolt")
                                 )
                             ),
 
                         new Decorator(
-                            ret => !Me.HasAura( "Metamorphosis"),
+                            ret => !Me.HasAura("Metamorphosis"),
                             new PrioritySelector(
-                                Spell.Cast("Corruption", req => Me.CurrentTarget.HasAuraExpired("Corruption", 3)),
                                 CreateHandOfGuldanBehavior(),
-                                Spell.Cast("Soul Fire", ret => Me.HasAura("Molten Core")),
-                                Spell.Cast("Shadow Bolt")
+                                Spell.Cast("Shadow Bolt"),
+                                Spell.Cast("Fel Flame", req => Me.IsMoving)
                                 )
                             )
 
             #endregion
-                        )
-                    ),
-
-                Movement.CreateMoveToRangeAndStopBehavior( toUnit => Me.CurrentTarget, range => 35f)
+)
+                    )
                 );
         }
+
+
+        #region Handle Forcing Reapply of Doom if Needed due to Buff/Proc
+
+        static ulong _guidLastUberDoom = 0;
+        static DateTime _timeNextUberDoom = DateTime.Now;
+
+        private static bool NeedToReapplyDoom()
+        {
+            if (Me.HasAura("Perfect Aim") && (_guidLastUberDoom != Me.CurrentTargetGuid || _timeNextUberDoom < DateTime.Now))
+            {
+                _guidLastUberDoom = Me.CurrentTargetGuid;
+                _timeNextUberDoom = DateTime.Now + TimeSpan.FromSeconds(60);
+                Logger.Write(Color.White, "^Perfect Aim: applying 100% Critical Doom");
+                return true;
+            }
+
+            return false;
+        }
+
+        #endregion
+
+        private static uint endMoltenCore = 0;
+        private static uint stackMoltenCore = 0;
 
         private static Composite CreateHandOfGuldanBehavior()
         {
@@ -197,10 +230,12 @@ namespace Singular.ClassSpecific.Warlock
                 // check if we have Corruption and we need to dump fury
                 else if (CurrentDemonicFury >= WarlockSettings.FurySwitchToDemon && !Me.CurrentTarget.HasKnownAuraExpired("Corruption"))
                     shouldCast = true;
+                else if (Me.HasAnyAura("Dark Soul: Knowledge", "Perfect Aim"))
+                    shouldCast = true;
                 
                 // if we need to cast, check that we can
                 if (shouldCast)
-                    shouldCast = SpellManager.CanCast("Metamorphosis", Me, false);
+                    shouldCast = Spell.CanCastHack("Metamorphosis", Me, false);
             }
 
             return shouldCast;
@@ -231,7 +266,7 @@ namespace Singular.ClassSpecific.Warlock
                 if (CurrentDemonicFury < 40)
                     shouldCancel = true;
                 // check if we should stay in demon form because of buff
-                else if (Me.HasAura("Dark Soul: Knowledge"))
+                else if (Me.HasAnyAura("Dark Soul: Knowledge", "Perfect Aim"))
                     shouldCancel = false;
                 // check if we should stay in demon form because of Doom falling off
                 else if ( CurrentDemonicFury >= 60 && Me.CurrentTarget.HasAuraExpired("Metamorphosis: Doom", "Doom"))
@@ -296,48 +331,6 @@ namespace Singular.ClassSpecific.Warlock
 
         #endregion
 
-        private static Composite CreateWarlockDiagnosticOutputBehavior()
-        {
-            return new Throttle(1,
-                new Decorator(
-                    ret => SingularSettings.Debug,
-                    new Action(ret =>
-                    {
-                        WoWUnit target = Me.CurrentTarget;
-                        uint lstks = !Me.HasAura("Molten Core") ? 0 : Me.ActiveAuras["Molten Core"].StackCount;
-
-                        string msg;
-                        
-                        msg = string.Format(".... h={0:F1}%/m={1:F1}%, fury={2}, metamor={3}, mcore={4}, darksoul={5}, aoecnt={6}, isgcd={7}, gcd={8}",
-                             Me.HealthPercent,
-                             Me.ManaPercent,
-                             CurrentDemonicFury,
-                             Me.HasAura("Metamorphosis"),
-                             lstks,
-                             Me.HasAura("Dark Soul: Knowledge"),
-                             _mobCount, 
-                             Spell.IsGlobalCooldown(),
-                             Spell.GcdActive 
-                             );
-
-                        if (target != null)
-                        {
-                            msg += string.Format(", enemy={0}% @ {1:F1} yds, corrupt={2}, doom={3}, shdwflm={4}",
-                                (int)target.HealthPercent,
-                                target.Distance,
-                                (long)target.GetAuraTimeLeft("Corruption", true).TotalMilliseconds,
-                                (long)target.GetAuraTimeLeft("Doom", true).TotalMilliseconds,
-                                (long)target.GetAuraTimeLeft("Shadowflame", true).TotalMilliseconds
-                                );
-                        }
-
-                        Logger.WriteDebug(Color.Wheat, msg);
-                        return RunStatus.Failure;
-                    })
-                )
-            );
-        }
-
         private static Composite CreateSlowMeleeBehavior()
         {
             return new PrioritySelector(
@@ -365,5 +358,50 @@ namespace Singular.ClassSpecific.Warlock
                     )
                 );
         }
+
+        private static Composite CreateWarlockDiagnosticOutputBehavior(string s)
+        {
+            return new ThrottlePasses(1, 1,
+                new Decorator(
+                    ret => SingularSettings.Debug,
+                    new Action(ret =>
+                    {
+                        WoWUnit target = Me.CurrentTarget;
+                        uint lstks = !Me.HasAura("Molten Core") ? 0 : Me.ActiveAuras["Molten Core"].StackCount;
+
+                        string msg;
+
+                        msg = string.Format(".... [{0}] h={1:F1}%/m={2:F1}%, fury={3}, metamor={4}, mcore={5}, darksoul={6}, aoecnt={7}",
+                            s,
+                             Me.HealthPercent,
+                             Me.ManaPercent,
+                             CurrentDemonicFury,
+                             Me.HasAura("Metamorphosis"),
+                             lstks,
+                             Me.HasAura("Dark Soul: Knowledge"),
+                             _mobCount
+                             );
+
+                        if (target != null)
+                        {
+                            msg += string.Format(", enemy={0}% @ {1:F1} yds, face={2}, loss={3}, corrupt={4}, doom={5}, shdwflm={6}, ttd={7}",
+                                (int)target.HealthPercent,
+                                target.Distance,
+                                Me.IsSafelyFacing(target).ToYN(),
+                                target.InLineOfSpellSight.ToYN(),
+                                (long)target.GetAuraTimeLeft("Corruption", true).TotalMilliseconds,
+                                (long)target.GetAuraTimeLeft("Doom", true).TotalMilliseconds,
+                                (long)target.GetAuraTimeLeft("Shadowflame", true).TotalMilliseconds,
+                                target.TimeToDeath()
+                                );
+                        }
+
+                        Logger.WriteDebug(Color.Wheat, msg);
+                        return RunStatus.Failure;
+                    })
+                )
+            );
+        }
+
     }
 }

@@ -22,6 +22,7 @@ namespace Singular.ClassSpecific.Rogue
     {
         private static LocalPlayer Me { get { return StyxWoW.Me; } }
         private static RogueSettings RogueSettings { get { return SingularSettings.Instance.Rogue(); } }
+        private static bool HasTalent(RogueTalents tal) { return TalentManager.IsSelected((int)tal); } 
 
         #region Normal Rotation
 
@@ -29,13 +30,14 @@ namespace Singular.ClassSpecific.Rogue
         public static Composite CreateRogueSubtletyNormalPull()
         {
             return new PrioritySelector(
-                Common.CreateRoguePullBuffs(),      // needed because some Bots not calling this behavior
-
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
                 Helpers.Common.CreateDismount("Pulling"),
+                Common.CreateRoguePullBuffs(),      // needed because some Bots not calling this behavior
+                Safers.EnsureTarget(),
+                Common.CreateRogueControlNearbyEnemyBehavior(),
+                Common.CreateRogueMoveBehindTarget(),
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
                 Spell.WaitForCastOrChannel(),
+                    
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown() && Me.GotTarget && Me.IsSafelyFacing(Me.CurrentTarget),
                     new PrioritySelector(
@@ -43,14 +45,14 @@ namespace Singular.ClassSpecific.Rogue
                         CreateSubteltyDiagnosticOutputBehavior("Pull"),
 
                         Common.CreateRogueOpenerBehavior(),
-                        Common.CreateAttackFlyingMobs(),
-                        Spell.Buff("Premeditation", req => Common.IsStealthed && Me.ComboPoints < 5),
+                        Common.CreatePullMobMovingAwayFromMe(),
+                        Common.CreateAttackFlyingOrUnreachableMobs(),
+
+                        // ok, everything else failed so just hit him!!!!
+                        Spell.OffGCD(Spell.Buff("Premeditation", req => Common.IsStealthed && Me.ComboPoints < 4 && Me.IsWithinMeleeRange)),
                         Spell.Cast("Hemorrhage")
                         )
-                    ),
-
-                Movement.CreateMoveBehindTargetBehavior(),
-                Movement.CreateMoveToMeleeBehavior(true)
+                    )
                 );
         }
         [Behavior(BehaviorType.Combat, WoWClass.Rogue, WoWSpec.RogueSubtlety, WoWContext.Normal | WoWContext.Battlegrounds)]
@@ -58,8 +60,8 @@ namespace Singular.ClassSpecific.Rogue
         {
             return new PrioritySelector(
                 Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
+                Common.CreateRogueMoveBehindTarget(),
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
 
                 Spell.WaitForCastOrChannel(),
                 new Decorator(
@@ -68,18 +70,16 @@ namespace Singular.ClassSpecific.Rogue
 
                         // updated time to death tracking values before we need them
                         new Action(ret => { Me.CurrentTarget.TimeToDeath(); return RunStatus.Failure; }),
-                        CreateSubteltyDiagnosticOutputBehavior("Combat"),
 
-                        new Throttle(Helpers.Common.CreateInterruptBehavior()),
-
-                        Movement.CreateMoveBehindTargetBehavior(),
+                        Helpers.Common.CreateInterruptBehavior(),
+                        Common.CreateDismantleBehavior(),
 
                         Common.CreateRogueOpenerBehavior(),
 
                         Spell.Buff("Premeditation", req => Common.IsStealthed && Me.ComboPoints <= 3),
 
                         new Decorator(
-                            ret => Common.AoeCount > 1,
+                            ret => Common.AoeCount > 1 && !Me.CurrentTarget.IsPlayer,
                             new PrioritySelector(
                                 Spell.BuffSelf("Shadow Dance", ret => Common.AoeCount >= 3),
                                 Spell.Cast("Eviscerate", ret => Me.ComboPoints >= 5 && Common.AoeCount < 7 && !Me.CurrentTarget.HasAuraExpired("Crimson Tempest", 7)),
@@ -88,7 +88,7 @@ namespace Singular.ClassSpecific.Rogue
                                 )
                             ),
                         new Decorator(
-                            ret => Common.AoeCount >= 3,
+                            ret => Common.AoeCount >= 3 && !Me.CurrentTarget.IsPlayer,
                             new PrioritySelector(
                                 Spell.Cast("Slice and Dice", on => Me, ret => Me.ComboPoints > 0 && Me.HasAuraExpired("Slice and Dice", 2)),
                                 Spell.Cast("Crimson Tempest", ret => Me.ComboPoints >= 5),
@@ -98,35 +98,31 @@ namespace Singular.ClassSpecific.Rogue
                                 )
                             ),
 
-                        // Vanish to boost DPS if behind target, not stealthed, have slice/dice, and 0/1 combo pts
                         Spell.BuffSelf("Shadow Dance",
                             ret => Me.GotTarget
                                 && !Common.IsStealthed
                                 && !Me.HasAuraExpired("Slice and Dice", 3)
                                 && Me.ComboPoints < 2),
 
-                        Spell.Cast("Slice and Dice", on => Me, ret => Me.ComboPoints > 0 && Me.HasAuraExpired("Slice and Dice", 2)),
+                        // lets try a big hit if stealthed and behind before anything
+                        Spell.Cast("Ambush", ret => HasTalent(RogueTalents.Subterfuge) && Me.HasAura("Subterfuge") && Common.IsStealthed && Me.IsSafelyBehind(Me.CurrentTarget)),
+
+                        Spell.Cast("Slice and Dice",  on => Me,  ret => Me.ComboPoints > 0 && Me.HasAuraExpired("Slice and Dice", 2)),
+
                         Spell.Buff("Rupture", true, ret => Me.ComboPoints >= 5),
                         Spell.Cast("Eviscerate", ret => Me.ComboPoints >= 5),
 
                         Spell.Cast("Ambush", ret => Me.IsSafelyBehind(Me.CurrentTarget) && Common.IsStealthed),
                         Spell.Buff("Hemorrhage"),
-                        Spell.Cast("Backstab", ret => Me.IsSafelyBehind(Me.CurrentTarget)),
-                        Spell.BuffSelf("Fan of Knives", ret => Common.AoeCount >= RogueSettings.FanOfKnivesCount ),
+                        Spell.Cast("Backstab", ret => Me.IsSafelyBehind(Me.CurrentTarget) && Common.HasDaggerInMainHand),
+                        Spell.BuffSelf("Fan of Knives", ret => !Me.CurrentTarget.IsPlayer && Common.AoeCount >= RogueSettings.FanOfKnivesCount),
 
                 // following cast is as a Combo Point builder if we can't cast Backstab
                         Spell.Cast("Hemorrhage", ret => Me.CurrentEnergy >= 35 || !SpellManager.HasSpell("Backstab") || !Me.IsSafelyBehind(Me.CurrentTarget)),
 
-                        new ThrottlePasses(60,
-                            new Decorator(
-                                ret => !Me.Disarmed && !Common.HasDaggerInMainHand && SpellManager.HasSpell("Backstab"),
-                                new Action(ret => Logger.Write(Color.HotPink, "config error: cannot cast Backstab without Dagger in Mainhand"))
-                                )
-                            )
+                        Common.CheckThatDaggersAreEquippedIfNeeded()
                         )
-                    ),
-
-                Movement.CreateMoveToMeleeBehavior(true)
+                    )
                 );
         }
 
@@ -139,8 +135,9 @@ namespace Singular.ClassSpecific.Rogue
         {
             return new PrioritySelector(
                 Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
+                Common.CreateRogueMoveBehindTarget(),
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
+                
                 Spell.WaitForCastOrChannel(),
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown(),
@@ -148,8 +145,8 @@ namespace Singular.ClassSpecific.Rogue
 
                         // updated time to death tracking values before we need them
                         new Action(ret => { Me.CurrentTarget.TimeToDeath(); return RunStatus.Failure; }),
-                        CreateSubteltyDiagnosticOutputBehavior("Combat"),
                         Helpers.Common.CreateInterruptBehavior(),
+                        Common.CreateDismantleBehavior(),
 
                         Spell.Buff("Premeditation", req => Common.IsStealthed && Me.ComboPoints <= 3),
 
@@ -162,7 +159,6 @@ namespace Singular.ClassSpecific.Rogue
                                 )
                             ),
 
-                        Movement.CreateMoveBehindTargetBehavior(),
                         Spell.BuffSelf("Shadow Dance", ret => Me.CurrentTarget.MeIsBehind && !Me.HasAura("Stealth")),
                         Spell.BuffSelf("Vanish", ret => Me.CurrentTarget.IsBoss() && Me.CurrentTarget.MeIsBehind),
 
@@ -172,25 +168,22 @@ namespace Singular.ClassSpecific.Rogue
 
                         Spell.Cast("Ambush", ret => Me.CurrentTarget.MeIsBehind && (Me.HasAura("Shadow Dance") || Me.HasAura("Stealth"))),
                         Spell.Buff("Hemorrhage"),
-                        Spell.Cast("Backstab", ret => Me.CurrentTarget.MeIsBehind && HasDaggersEquipped),
-                        Spell.Cast("Hemorrhage", ret => !Me.CurrentTarget.MeIsBehind || !HasDaggersEquipped))
-                    ),
-                Movement.CreateMoveToMeleeBehavior(true)
+                        Spell.Cast("Backstab", ret => Me.CurrentTarget.MeIsBehind && Common.HasDaggerInMainHand ),
+                        Spell.Cast("Hemorrhage", ret => !Me.CurrentTarget.MeIsBehind || !Common.HasDaggerInMainHand),
+
+                        Common.CheckThatDaggersAreEquippedIfNeeded()
+                        )
+                    )
                 );
         }
 
-        static bool HasDaggersEquipped
-        {
-            get
-            {
-                var mainhand = Me.Inventory.Equipped.MainHand;
-                var offhand = Me.Inventory.Equipped.OffHand;
-                return mainhand != null && mainhand.ItemInfo != null && mainhand.ItemInfo.WeaponClass == WoWItemWeaponClass.Dagger && offhand != null &&
-                       offhand.ItemInfo != null && offhand.ItemInfo.WeaponClass == WoWItemWeaponClass.Dagger;
-            }
-        }
-
         #endregion
+
+        [Behavior(BehaviorType.Heal, WoWClass.Rogue, WoWSpec.RogueSubtlety, priority: 99)]
+        public static Composite CreateRogueHeal()
+        {
+            return CreateSubteltyDiagnosticOutputBehavior("Combat");
+        }
 
         private static Composite CreateSubteltyDiagnosticOutputBehavior(string sState = "")
         {

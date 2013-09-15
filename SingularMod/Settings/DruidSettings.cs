@@ -5,6 +5,7 @@ using System.IO;
 using Styx.Helpers;
 
 using DefaultValue = Styx.Helpers.DefaultValueAttribute;
+using System.Drawing;
 
 namespace Singular.Settings
 {
@@ -18,10 +19,43 @@ namespace Singular.Settings
     internal class DruidSettings : Styx.Helpers.Settings
     {
         public DruidSettings()
-            : base(Path.Combine(SingularSettings.SettingsPath, "Druid.xml"))
+            : base(Path.Combine(SingularSettings.SingularSettingsPath, "Druid.xml"))
         {
         }
-        // Pvp By IloveAnimals
+
+        #region Context Late Loading Wrappers
+
+        private DruidHealSettings _battleground;
+        private DruidHealSettings _instance;
+        private DruidHealSettings _raid;
+        private DruidHealSettings _normal;
+
+        [Browsable(false)]
+        public DruidHealSettings Battleground { get { return _battleground ?? (_battleground = new DruidHealSettings(HealingContext.Battlegrounds)); } }
+
+        [Browsable(false)]
+        public DruidHealSettings Instance { get { return _instance ?? (_instance = new DruidHealSettings(HealingContext.Instances)); } }
+
+        [Browsable(false)]
+        public DruidHealSettings Raid { get { return _raid ?? (_raid = new DruidHealSettings(HealingContext.Raids)); } }
+
+        [Browsable(false)]
+        public DruidHealSettings Normal { get { return _normal ?? (_normal = new DruidHealSettings(HealingContext.Normal)); } }
+
+        [Browsable(false)]
+        public DruidHealSettings Heal { get { return HealLookup(Singular.SingularRoutine.CurrentWoWContext); } }
+
+        public DruidHealSettings HealLookup(WoWContext ctx)
+        {
+            if (ctx == WoWContext.Battlegrounds)
+                return Battleground;
+            if (ctx == WoWContext.Instances)
+                return Styx.StyxWoW.Me.CurrentMap.IsRaid ? Raid : Instance;
+            return Normal;
+        }
+
+        #endregion
+
 
         #region pvp
         /*
@@ -122,6 +156,13 @@ namespace Singular.Settings
         #region Common
 
         [Setting]
+        [DefaultValue(false)]
+        [Category("Common")]
+        [DisplayName("Use Travel Form")]
+        [Description("Cast Travel Form (or Cat Form) for faster movement while running on foot")]
+        public bool UseTravelForm { get; set; }
+
+        [Setting]
         [DefaultValue(40)]
         [Category("Common")]
         [DisplayName("Innervate Mana")]
@@ -142,6 +183,12 @@ namespace Singular.Settings
         [Description("Use Wild Charge as appropriate for spec")]
         public bool UseWildCharge { get; set; }
 
+        [Setting]
+        [DefaultValue(false)]
+        [Category("Common")]
+        [DisplayName("Move Behind Targets")]
+        [Description("Move behind targets for opener or when target stunned/not targeting Druid in Cat Form")]
+        public bool MoveBehindTargets { get; set; }
 
 /*
                         [Setting]
@@ -157,37 +204,61 @@ namespace Singular.Settings
                         [Description("Healing Touch will be used at this value.")]
                         public int NonRestoHealingTouch { get; set; }
 
-                        [Setting]
-                        [DefaultValue(40)]
-                        [Category("Common")]
-                        [DisplayName("Rejuvenation Health (Balance and Feral)")]
-                        [Description("Rejuvenation will be used at this value")]
-                        public int NonRestoRejuvenation { get; set; }
                 */
+
         [Setting]
-        [DefaultValue(true)]
-        [Category("Common")]
-        [DisplayName("Use Combat Rez")]
-        [Description("If set to true, it will rez while in combat.")]
-        public bool UseRebirth { get; set; }
+        [DefaultValue(60)]
+        [Category("Self Healing")]
+        [DisplayName("Rejuvenation")]
+        [Description("Health Percent to cast for self-heal when Solo")]
+        public int SelfRejuvenationHealth { get; set; }
+
+        [Setting]
+        [DefaultValue(40)]
+        [Category("Self Healing")]
+        [DisplayName("Healing Touch")]
+        [Description("Health Percent to cast for self-heal when Solo")]
+        public int SelfHealingTouchHealth { get; set; }
 
         [Setting]
         [DefaultValue(35)]
-        [Category("Common")]
-        [DisplayName("Renewal Health")]
-        [Description("Renewal will be used at this value. ")]
-        public int RenewalHealth { get; set; }
+        [Category("Self Healing")]
+        [DisplayName("Renewal")]
+        [Description("Health Percent to cast for self-heal when Solo")]
+        public int SelfRenewalHealth { get; set; }
+
+        [Setting]
+        [DefaultValue(20)]
+        [Category("Self Healing")]
+        [DisplayName("Ancestral Swiftness")]
+        [Description("Health Percent to cast for self-heal when Solo")]
+        public int SelfNaturesSwiftnessHealth { get; set; } 
+
+        [Setting]
+        [DefaultValue(80)]
+        [Category("Self Healing")]
+        [DisplayName("Cenarion Ward")]
+        [Description("Health Percent to cast for self-heal when Solo")]
+        public int SelfCenarionWardHealth { get; set; }
 
         #endregion
 
         #region Balance
 
         [Setting]
-        [DefaultValue(true)]
+        [DefaultValue(80)]
         [Category("Balance")]
-        [DisplayName("Allow Kiting")]
-        [Description("Allow Kiting mob to minimize damage taken")]
-        public bool AllowKiting { get; set; }
+        [DisplayName("Moon Beast Rejuvenation")]
+        [Description("Health Percent to cast for Moon Beast-heal when Solo")]
+        public int MoonBeastRejuvenationHealth { get; set; }
+
+        [Setting]
+        [DefaultValue(40)]
+        [Category("Balance")]
+        [DisplayName("Moon Beast Healing Touch")]
+        [Description("Health Percent to cast for Moon Beast-heal when Solo")]
+        public int MoonBeastHealingTouch { get; set; }
+
 
         #endregion
 
@@ -257,20 +328,6 @@ namespace Singular.Settings
         public int Rejuvenation { get; set; }
 
         [Setting]
-        [DefaultValue(80)]
-        [Category("Restoration")]
-        [DisplayName("Tree of Life Health")]
-        [Description("Tree of Life will be used at this value")]
-        public int TreeOfLifeHealth { get; set; }
-
-        [Setting]
-        [DefaultValue(3)]
-        [Category("Restoration")]
-        [DisplayName("Tree of Life Count")]
-        [Description("Tree of Life will be used when count of party members whom health is below Tree of Life health mets this value ")]
-        public int TreeOfLifeCount { get; set; }
-
-        [Setting]
         [DefaultValue(70)]
         [Category("Restoration")]
         [DisplayName("Barkskin Health")]
@@ -320,12 +377,34 @@ namespace Singular.Settings
 
         #region Feral
 
+        public enum SpellPriority
+        {
+            Noxxic = 1,
+            ElitistJerks = 3
+        }
+
+
         [Setting]
-        [DefaultValue(1)]
+        [DefaultValue(SpellPriority.Noxxic)]
         [Category("Feral")]
         [DisplayName("Instance Spell Priority")]
-        [Description("1:Noxxic, 2:Elitist Jerks")]
-        public int FeralSpellPriority { get; set; }
+        public SpellPriority FeralSpellPriority { get; set; }
+
+
+        [Setting]
+        [DefaultValue(80)]
+        [Category("Feral")]
+        [DisplayName("Pred Swift Healing Touch")]
+        [Description("Health Percent to cast for Predatory Swiftness heal when Solo")]
+        public int PredSwiftnessHealingTouchHealth { get; set; }
+
+        [Setting]
+        [DefaultValue(35)]
+        [Category("Feral")]
+        [DisplayName("Pred Swift PVP Off-Heal")]
+        [Description("Health Percent to cast for Predatory Swiftness heal on group member")]
+        public int PredSwiftnessPvpHeal { get; set; }
+
 
 /*
         [Setting]
@@ -342,158 +421,396 @@ namespace Singular.Settings
         [DisplayName("Survival Instincts Health %")]
         [Description("SI will be used at this value. Set this to 100 to enable on cooldown usage. (Recommended: 55)")]
         public int SurvivalInstinctsHealth { get; set; }
-/*
-        [Setting]
-        [DefaultValue(30)]
-        [Category("Feral PvP")]
-        [DisplayName("Frenzied Regeneration Health")]
-        [Description("FR will be used at this value. Set this to 100 to enable on cooldown usage. (Recommended: 30 if glyphed. 15 if not.)")]
-        public int FrenziedRegenerationHealth { get; set; }
 
         [Setting]
-        [DefaultValue(0)]
-        [Category("Form Selection")]
-        [DisplayName("Form Selection")]
-        [Description("Form Selection!")]
-        public int Shapeform { get; set; }
-
-        [Setting]
-        [DefaultValue(60)]
+        [DefaultValue(false)]
         [Category("Feral")]
-        [DisplayName("Predator's Swiftness heal")]
-        [Description("Healing with Predator's Swiftness will be used at this value")]
-        public int NonRestoprocc { get; set; }
+        [DisplayName("Prowl Always")]
+        [Description("Prowl at all times out of combat. Does not disable mounting (you can in HB Settings if desired)")]
+        public bool ProwlAlways { get; set; }
 
-        [Setting]
-        [DefaultValue(true)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Cat - Disable Healing for Balance and Feral")]
-        public bool RaidCatProwl { get; set; }
+/*
+                [Setting]
+                [DefaultValue(30)]
+                [Category("Feral PvP")]
+                [DisplayName("Frenzied Regeneration Health")]
+                [Description("FR will be used at this value. Set this to 100 to enable on cooldown usage. (Recommended: 30 if glyphed. 15 if not.)")]
+                public int FrenziedRegenerationHealth { get; set; }
 
-        [Setting]
-        [DefaultValue(15)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Cat - Predator's Swiftness (Balance and Feral)")]
-        public int RaidCatProccHeal { get; set; }
+                [Setting]
+                [DefaultValue(0)]
+                [Category("Form Selection")]
+                [DisplayName("Form Selection")]
+                [Description("Form Selection!")]
+                public int Shapeform { get; set; }
+
+                [Setting]
+                [DefaultValue(60)]
+                [Category("Feral")]
+                [DisplayName("Predator's Swiftness heal")]
+                [Description("Healing with Predator's Swiftness will be used at this value")]
+                public int NonRestoprocc { get; set; }
+
+                [Setting]
+                [DefaultValue(true)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Cat - Disable Healing for Balance and Feral")]
+                public bool RaidCatProwl { get; set; }
+
+                [Setting]
+                [DefaultValue(15)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Cat - Predator's Swiftness (Balance and Feral)")]
+                public int RaidCatProccHeal { get; set; }
 
 
-        [Setting]
-        [DefaultValue(true)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Interrupt")]
-        [Description("Automatically interrupt spells while in an instance if this value is set to true.")]
-        public bool Interrupt { get; set; }
+                [Setting]
+                [DefaultValue(true)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Interrupt")]
+                [Description("Automatically interrupt spells while in an instance if this value is set to true.")]
+                public bool Interrupt { get; set; }
 
-        [Setting]
-        [DefaultValue(true)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Cat - Warn if not behind boss")]
-        public bool CatRaidWarning { get; set; }
+                [Setting]
+                [DefaultValue(true)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Cat - Warn if not behind boss")]
+                public bool CatRaidWarning { get; set; }
 
-        [Setting]
-        [DefaultValue(true)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Cat - Use dash as gap closer")]
-        public bool CatRaidDash { get; set; }
+                [Setting]
+                [DefaultValue(true)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Cat - Use dash as gap closer")]
+                public bool CatRaidDash { get; set; }
 
-        [Setting]
-        [DefaultValue(true)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Cat - Use Raid button ")]
-        //[Description("If set to true, it will cast Berserk only if we got adds.")]
-        public bool CatRaidButtons { get; set; }
+                [Setting]
+                [DefaultValue(true)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Cat - Use Raid button ")]
+                //[Description("If set to true, it will cast Berserk only if we got adds.")]
+                public bool CatRaidButtons { get; set; }
 
-        [Setting]
-        [DefaultValue(true)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Cat - Use Stampeding Roar")]
-        [Description("If set to true, it will cast Stampeding Roar to close gap to target.")]
-        public bool CatRaidStampeding { get; set; }
+                [Setting]
+                [DefaultValue(true)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Cat - Use Stampeding Roar")]
+                [Description("If set to true, it will cast Stampeding Roar to close gap to target.")]
+                public bool CatRaidStampeding { get; set; }
         
 
 
-        [Setting]
-        [DefaultValue(true)]
-        [Category("Feral PvP")]
-        [DisplayName("Cat - Stealth Pull")]
-        [Description("Always try to pull while in stealth. If disabled it pulls with FFF instead.")]
-        public bool CatNormalPullStealth { get; set; }
+                [Setting]
+                [DefaultValue(true)]
+                [Category("Feral PvP")]
+                [DisplayName("Cat - Stealth Pull")]
+                [Description("Always try to pull while in stealth. If disabled it pulls with FFF instead.")]
+                public bool CatNormalPullStealth { get; set; }
 
 
-        [Setting]
-        [DefaultValue(4)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Cat - Adds to AOE")]
-        [Description("Number of adds needed to start Aoe rotation.")]
-        public int CatRaidAoe { get; set; }
+                [Setting]
+                [DefaultValue(4)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Cat - Adds to AOE")]
+                [Description("Number of adds needed to start Aoe rotation.")]
+                public int CatRaidAoe { get; set; }
 
-        [Setting]
-        [DefaultValue(true)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Cat - Auto Berserk")]
-        [Description("If set to true, it will cast Berserk automatically to do max dps.")]
-        public bool CatRaidBerserk { get; set; }
+                [Setting]
+                [DefaultValue(true)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Cat - Auto Berserk")]
+                [Description("If set to true, it will cast Berserk automatically to do max dps.")]
+                public bool CatRaidBerserk { get; set; }
 
-        [Setting]
-        [DefaultValue(true)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Cat - Auto Tiger's Fury")]
-        [Description("If set to true, it will cast Tiger's Fury automatically to do max dps.")]
-        public bool CatRaidTigers { get; set; }
+                [Setting]
+                [DefaultValue(true)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Cat - Auto Tiger's Fury")]
+                [Description("If set to true, it will cast Tiger's Fury automatically to do max dps.")]
+                public bool CatRaidTigers { get; set; }
 
-        [Setting]
-        [DefaultValue(false)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Cat - Rebuff infight")]
-        [Description("If set to true, it will rebuff Mark of the Wild infight.")]
-        public bool CatRaidRebuff { get; set; }
+                [Setting]
+                [DefaultValue(false)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Cat - Rebuff infight")]
+                [Description("If set to true, it will rebuff Mark of the Wild infight.")]
+                public bool CatRaidRebuff { get; set; }
 
-        [Setting]
-        [DefaultValue(true)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Cat - Feral Charge")]
-        [Description("Use Feral Charge to close gaps. It should handle bosses where charge is not" +
-                     "possible || best solution automatically.")]
-        public bool CatRaidUseFeralCharge { get; set; }
+                [Setting]
+                [DefaultValue(true)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Cat - Feral Charge")]
+                [Description("Use Feral Charge to close gaps. It should handle bosses where charge is not" +
+                             "possible || best solution automatically.")]
+                public bool CatRaidUseFeralCharge { get; set; }
 
-        [Setting]
-        [DefaultValue(true)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Bear - Feral Charge")]
-        [Description("Use Feral Charge to close gaps. It should handle bosses where charge is not" +
-                     "possible || best solution automatically.")]
-        public bool BearRaidUseFeralCharge { get; set; }
+                [Setting]
+                [DefaultValue(true)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Bear - Feral Charge")]
+                [Description("Use Feral Charge to close gaps. It should handle bosses where charge is not" +
+                             "possible || best solution automatically.")]
+                public bool BearRaidUseFeralCharge { get; set; }
 
-        [Setting]
-        [DefaultValue(2)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Bear - Adds to AOE")]
-        [Description("Number of adds needed to start Aoe rotation.")]
-        public int BearRaidAoe { get; set; }
+                [Setting]
+                [DefaultValue(2)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Bear - Adds to AOE")]
+                [Description("Number of adds needed to start Aoe rotation.")]
+                public int BearRaidAoe { get; set; }
 
-        [Setting]
-        [DefaultValue(true)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Auto Berserk")]
-        [Description("If set to true, it will cast Berserk automatically to do max threat.")]
-        public bool BearRaidBerserk { get; set; }
+                [Setting]
+                [DefaultValue(true)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Auto Berserk")]
+                [Description("If set to true, it will cast Berserk automatically to do max threat.")]
+                public bool BearRaidBerserk { get; set; }
 
-        [Setting]
-        [DefaultValue(false)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Bear - Berserk Burst")]
-        [Description("If set to true, it will SPAM MANGLE FOR GODS SAKE while Berserk is active.")]
-        public bool BearRaidBerserkFun { get; set; }
+                [Setting]
+                [DefaultValue(false)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Bear - Berserk Burst")]
+                [Description("If set to true, it will SPAM MANGLE FOR GODS SAKE while Berserk is active.")]
+                public bool BearRaidBerserkFun { get; set; }
 
-        [Setting]
-        [DefaultValue(true)]
-        [Category("Feral Raid / Instance")]
-        [DisplayName("Bear - Auto defensive cooldowns")]
-        [Description("If set to true, it will cast defensive cooldowns automatically.")]
-        public bool BearRaidCooldown { get; set; }
-*/
+                [Setting]
+                [DefaultValue(true)]
+                [Category("Feral Raid / Instance")]
+                [DisplayName("Bear - Auto defensive cooldowns")]
+                [Description("If set to true, it will cast defensive cooldowns automatically.")]
+                public bool BearRaidCooldown { get; set; }
+        */
         // End of IloveDruids
 
         #endregion
     }
+
+
+    internal class DruidHealSettings : Singular.Settings.HealerSettings
+    {
+        private DruidHealSettings()
+            : base("", HealingContext.None)
+        {
+        }
+
+        public DruidHealSettings(HealingContext ctx)
+            : base("Shaman", ctx)
+        {
+
+            // we haven't created a settings file yet,
+            //  ..  so initialize values for various heal contexts
+
+            if (!SavedToFile)
+            {
+                if (ctx == Singular.HealingContext.Battlegrounds)
+                {
+                    Rejuvenation = 95;
+                    Nourish = 0;
+                    HealingTouch = 0;
+                    Regrowth = 75;
+                    WildGrowth = 90;
+                    CountWildGrowth = 3;
+                    SwiftmendAOE = 0;
+                    CountSwiftmendAOE = 0;
+                    SwiftmendDirectHeal = 74;
+                    WildMushroomBloom = 60;
+                    CountMushroomBloom = 1;
+                    Tranquility = 0;
+                    CountTranquility = 0;
+                    TreeOfLife = 60;
+                    CountTreeOfLife = 1;
+                    Ironbark = 59;
+                    NaturesSwiftness = 35;
+                    CenarionWard = 80;
+                    NaturesVigil = 60;
+                }
+                else if (ctx == Singular.HealingContext.Instances)
+                {
+                    Rejuvenation = 95;
+                    Nourish = 85;
+                    HealingTouch = 70;
+                    Regrowth = 40;
+                    WildGrowth = 85;
+                    CountWildGrowth = 3;
+                    SwiftmendAOE = 0;
+                    CountSwiftmendAOE = 0;
+                    SwiftmendDirectHeal = 70;
+                    WildMushroomBloom = 85;
+                    CountMushroomBloom = 2;
+                    Tranquility = 60;
+                    CountTranquility = 3;
+                    TreeOfLife = 70;
+                    CountTreeOfLife = 3;
+                    Ironbark = 60;
+                    NaturesSwiftness = 25;
+                    CenarionWard = 80;
+                    NaturesVigil = 70;
+                }
+                else if (ctx == Singular.HealingContext.Raids)
+                {
+                    Rejuvenation = 94;
+                    Nourish = 95;
+                    HealingTouch = 60;
+                    Regrowth = 40;
+                    WildGrowth = 90;
+                    CountWildGrowth = 4;
+                    SwiftmendAOE = 0;
+                    CountSwiftmendAOE = 0;
+                    SwiftmendDirectHeal = 85;
+                    WildMushroomBloom = 95;
+                    CountMushroomBloom = 3;
+                    Tranquility = 70;
+                    CountTranquility = 5;
+                    TreeOfLife = 75;
+                    CountTreeOfLife = 4;
+                    Ironbark = 65;
+                    NaturesSwiftness = 25;
+                    CenarionWard = 85;
+                    NaturesVigil = 80;
+                }
+                // omit case for WoWContext.Normal and let it use DefaultValue() values
+            }
+
+            SavedToFile = true;
+        }
+
+        [Setting]
+        [Browsable(false)]
+        [DefaultValue(false)]
+        public bool SavedToFile { get; set; }
+
+        [Setting]
+        [DefaultValue(70)]
+        [Category("Restoration")]
+        [DisplayName("% Rejuvenation")]
+        [Description("Health % to cast this ability at. Set to 0 to disable.")]
+        public int Rejuvenation { get; set; }
+
+        [Setting]
+        [DefaultValue(70)]
+        [Category("Restoration")]
+        [DisplayName("% Nourish")]
+        [Description("Health % to cast this ability at. Set to 0 to disable.")]
+        public int Nourish { get; set; }
+
+        [Setting]
+        [DefaultValue(70)]
+        [Category("Restoration")]
+        [DisplayName("% Healing Touch")]
+        [Description("Health % to cast this ability at. Set to 0 to disable. Overridden by Regrowth if Glyphed")]
+        public int HealingTouch { get; set; }
+
+        [Setting]
+        [DefaultValue(70)]
+        [Category("Restoration")]
+        [DisplayName("% Regrowth")]
+        [Description("Health % to cast this ability at. Set to 0 to disable.")]
+        public int Regrowth { get; set; }
+
+        [Setting]
+        [DefaultValue(92)]
+        [Category("Restoration")]
+        [DisplayName("% Wild Growth")]
+        [Description("Health % to cast this ability at. Set to 0 to disable.")]
+        public int WildGrowth { get; set; }
+
+        [Setting]
+        [DefaultValue(4)]
+        [Category("Restoration")]
+        [DisplayName("Wild Growth Min Count")]
+        [Description("Min number of players below Healing Rain % in area")]
+        public int CountWildGrowth { get; set; }
+
+        [Setting]
+        [DefaultValue(70)]
+        [Category("Restoration")]
+        [DisplayName("% Swiftmend (AOE)")]
+        [Description("Health % to cast this ability at based upon minimum player count. Set to 0 to disable.")]
+        public int SwiftmendAOE { get; set; }
+
+        [Setting]
+        [DefaultValue(3)]
+        [Category("Restoration")]
+        [DisplayName("Swiftmend (AOE) Min Count")]
+        [Description("Min number of players healed")]
+        public int CountSwiftmendAOE { get; set; }
+
+        [Setting]
+        [DefaultValue(70)]
+        [Category("Restoration")]
+        [DisplayName("% Swiftmend (Direct Heal)")]
+        [Description("Health % to cast this ability at based upon single player health. Set to 0 to disable.")]
+        public int SwiftmendDirectHeal { get; set; }
+
+        [Setting]
+        [DefaultValue(70)]
+        [Category("Restoration")]
+        [DisplayName("% Wild Mushroom: Bloom")]
+        [Description("Health % to cast this ability at. Set to 0 to disable.")]
+        public int WildMushroomBloom { get; set; }
+
+        [Setting]
+        [DefaultValue(3)]
+        [Category("Restoration")]
+        [DisplayName("Mushroom: Bloom Min Count")]
+        [Description("Min number of players below Mushroom: Bloom % in area")]
+        public int CountMushroomBloom { get; set; }
+
+        [Setting]
+        [DefaultValue(91)]
+        [Category("Restoration")]
+        [DisplayName("% Tranquility")]
+        [Description("Health % to cast this ability at. Must heal Min of 3 people in party, 4 in a raid. Set to 0 to disable.")]
+        public int Tranquility { get; set; }
+
+        [Setting]
+        [DefaultValue(4)]
+        [Category("Restoration")]
+        [DisplayName("Tranquility Min Count")]
+        [Description("Min number of players below Healing Rain % in area")]
+        public int CountTranquility { get; set; }
+
+        [Setting]
+        [DefaultValue(60)]
+        [Category("Restoration")]
+        [DisplayName("% Tree of Life Form")]
+        [Description("Health % to cast this ability at. Set to 0 to disable.")]
+        public int TreeOfLife { get; set; }
+
+        [Setting]
+        [DefaultValue(3)]
+        [Category("Restoration")]
+        [DisplayName("Tree of Life Min Count")]
+        [Description("Min number of players below Tree of Life % in area")]
+        public int CountTreeOfLife { get; set; }
+
+        [Setting]
+        [DefaultValue(60)]
+        [Category("Restoration")]
+        [DisplayName("% Ironbark")]
+        [Description("Health % to cast this ability at. Set to 0 to disable.")]
+        public int Ironbark { get; set; }
+
+        [Setting]
+        [DefaultValue(60)]
+        [Category("Restoration")]
+        [DisplayName("% Nature's Swiftness")]
+        [Description("Health % to cast this ability at. Set to 0 to disable.")]
+        public int NaturesSwiftness { get; set; }
+
+        [Setting]
+        [DefaultValue(60)]
+        [Category("Restoration")]
+        [DisplayName("% Cenarion Ward")]
+        [Description("Health % to cast this ability at. Set to 0 to disable.")]
+        public int CenarionWard { get; set; }
+
+        [Setting]
+        [DefaultValue(60)]
+        [Category("Restoration")]
+        [DisplayName("% Nature's Vigil")]
+        [Description("Health % to cast this ability at. Set to 0 to disable.")]
+        public int NaturesVigil { get; set; }
+
+    }
+
 }

@@ -13,6 +13,8 @@ using Singular.Managers;
 using Singular.Dynamics;
 using Styx.CommonBot;
 using CommonBehaviors.Actions;
+using System.Drawing;
+using Styx.Pathing;
 
 namespace Singular.ClassSpecific.Warrior
 {
@@ -40,21 +42,37 @@ namespace Singular.ClassSpecific.Warrior
         {
             return new PrioritySelector(
                 Spell.BuffSelf("Berserker Rage", ret => Me.Fleeing || (Me.Stunned && Me.HasAuraWithMechanic(Styx.WoWInternals.WoWSpellMechanic.Sapped))),
-                Spell.BuffSelf("Enraged Regeneration", ret => Me.Stunned && StyxWoW.Me.HealthPercent < 60)
+                // StyxWoW.Me.HasAuraWithMechanic(WoWSpellMechanic.Fleeing, WoWSpellMechanic.Sapped, WoWSpellMechanic.Incapacitated, WoWSpellMechanic.Horrified)),
+
+                CreateWarriorEnragedRegeneration()
                 );
         }
-        
+
+
+        public static Composite CreateWarriorEnragedRegeneration()
+        {
+            return new Decorator(
+                req => Me.HealthPercent < WarriorSettings.WarriorEnragedRegenerationHealth && !Spell.IsSpellOnCooldown("Enraged Regeneration"),
+                new Sequence(
+                    new PrioritySelector(
+                        Spell.BuffSelf("Berserker Rage"),
+                        new ActionAlwaysSucceed()
+                        ),
+                    Spell.BuffSelf("Enraged Regeneration")
+                    )
+                );
+        }
 
         public static string SelectedShout
         {
-            get { return SingularSettings.Instance.Warrior().Shout.ToString().CamelToSpaced().Substring(1); }
+            get { return WarriorSettings.Shout.ToString().CamelToSpaced().Substring(1); }
         }
 
         public static WarriorStance  SelectedStance
         {
             get
             {
-                var stance = SingularSettings.Instance.Warrior().Stance;
+                var stance = WarriorSettings.Stance;
                 if (stance == WarriorStance.Auto)
                 {
                     switch (Me.Specialization)
@@ -76,35 +94,45 @@ namespace Singular.ClassSpecific.Warrior
             }
         }
 
+        /// <summary>
+        /// keep a single copy of Charge Behavior so the wrapping Throttle will account for 
+        /// uses across multiple behaviors that reference this method
+        /// </summary>
+        private static Composite _singletonChargeBehavior = null;
+        private static float _distanceChargeBehavior { get; set; }
+       
         public static Composite CreateChargeBehavior()
         {
-            return new Throttle( 1,
-                new Decorator(
-                    ret => Me.CurrentTarget != null,
+            _distanceChargeBehavior = Me.CombatReach + (TalentManager.HasGlyph("Long Charge") ? 30f : 25f);
+            if (_singletonChargeBehavior == null)
+            {
+                _singletonChargeBehavior = new Throttle(TimeSpan.FromMilliseconds(1500),
+                    new Decorator(
+                        ret => MovementManager.IsClassMovementAllowed && Me.CurrentTarget != null && Me.CurrentTargetGuid != Singular.Utilities.EventHandlers.LastNoPathTarget,
 
-                    new PrioritySelector(
-                        Spell.Cast("Charge",
-                            ret => MovementManager.IsClassMovementAllowed
-                                && !Me.CurrentTarget.HasMyAura("Charge Stun")
-                                && Me.CurrentTarget.SpellDistance() >= 10 && Me.CurrentTarget.SpellDistance() < (TalentManager.HasGlyph("Long Charge") ? 30f : 25f)
-                                && WarriorSettings.UseWarriorCloser),
+                        new PrioritySelector(
+                            // Charge to close distance
+                            // note: use SpellDistance since charge is to a wowunit
+                            Spell.Cast("Charge",
+                                ret => !Me.CurrentTarget.HasAnyOfMyAuras("Charge Stun", "Warbringer")
+                                    && Me.CurrentTarget.Distance.Between( 8, _distanceChargeBehavior) 
+                                    && WarriorSettings.UseWarriorCloser),
 
-                        Spell.CastOnGround("Heroic Leap", 
-                            on => Me.CurrentTarget, 
-                            req => MovementManager.IsClassMovementAllowed
-                                && !Me.HasAura("Charge")
-                                && Me.CurrentTarget.SpellDistance() > 9
-                                && !Me.CurrentTarget.HasMyAura("Charge Stun")
-                                && WarriorSettings.UseWarriorCloser, 
-                            false),
-
-                        Spell.Cast("Heroic Throw",
-                            ret => !Me.CurrentTarget.HasMyAura("Charge Stun")
-                                && !Me.HasAura("Charge")
+                            //  Leap to close distance
+                            // note: use Distance rather than SpellDistance since spell is to point on ground
+                            Spell.CastOnGround("Heroic Leap",
+                                on => Me.CurrentTarget,
+                                req => !Me.HasAura("Charge")
+                                    && Me.CurrentTarget.Distance.Between( 8, 40)
+                                    && !Me.CurrentTarget.HasAnyOfMyAuras("Charge Stun", "Warbringer")
+                                    && WarriorSettings.UseWarriorCloser,
+                                false)
                             )
                         )
-                    )
-                );
+                    );
+            }
+
+            return _singletonChargeBehavior;
         }
 
         private static int _VictoryRushHealth = 0;
@@ -142,6 +170,33 @@ namespace Singular.ClassSpecific.Warrior
                 );
         }
 
+        public static Composite CreateDisarmBehavior()
+        {
+            if ( !WarriorSettings.UseDisarm )
+                return new ActionAlwaysFail();
+
+            if (SingularRoutine.CurrentWoWContext == WoWContext.Battlegrounds)
+            {
+                return new Throttle(15, 
+                    Spell.Cast("Disarm", on => {
+                        if (Spell.IsSpellOnCooldown("Disarm"))
+                            return null;
+
+                        WoWUnit unit = Unit.NearbyUnfriendlyUnits.FirstOrDefault(
+                            u => u.IsWithinMeleeRange
+                                && (u.IsMelee() || u.Class == WoWClass.Hunter)
+                                && !Me.CurrentTarget.Disarmed 
+                                && !Me.CurrentTarget.IsCrowdControlled()
+                                && Me.IsSafelyFacing(u, 150)
+                                );
+                        return unit;
+                        })
+                    );
+            }
+
+            return new Throttle( 15, Spell.Cast("Disarm", req => !Me.CurrentTarget.Disarmed && !Me.CurrentTarget.IsCrowdControlled()));
+        }
+
         /// <summary>
         /// checks if in a relatively balanced fight where atleast 3 of your
         /// teammates will benefti from long cooldowns.  fight must be atleast 3 v 3
@@ -153,16 +208,14 @@ namespace Singular.ClassSpecific.Warrior
         /// </summary>
         public static bool IsPvpFightWorthBanner
         {
-            get
+            get 
             {
                 int friends = Unit.NearbyFriendlyPlayers.Count(f => f.IsAlive);
-                int enemies = Unit.NearbyUnfriendlyUnits.Count();
-
-                if (friends < 3 || enemies < 3)
+                if (friends < 3)
                     return false;
 
-                int readyfriends = Unit.NearbyFriendlyPlayers.Count(f => f.IsAlive);
-                if (readyfriends < 3)
+                int enemies = Unit.NearbyUnfriendlyUnits.Count();
+                if (enemies < 3)
                     return false;
 
                 int diff = Math.Abs(friends - enemies);
@@ -171,6 +224,64 @@ namespace Singular.ClassSpecific.Warrior
         }
 
 
+        public static Composite CreateAttackFlyingOrUnreachableMobs()
+        {
+            return new Decorator(
+                ret =>
+                {
+                    if (!Me.GotTarget)
+                        return false;
+
+                    if (Me.CurrentTarget.IsPlayer)
+                        return false;
+
+                    if (Me.CurrentTarget.IsFlying)
+                    {
+                        Logger.Write(Color.White, "Ranged Attack: {0} is Flying! using Ranged attack....", Me.CurrentTarget.SafeName());
+                        return true;
+                    }
+
+                    if ((DateTime.Now - Singular.Utilities.EventHandlers.LastNoPathFailure).TotalSeconds < 1f)
+                    {
+                        Logger.Write(Color.White, "Ranged Attack: No Path Available error just happened, so using Ranged attack ....", Me.CurrentTarget.SafeName());
+                        return true;
+                    }
+/*
+                    if (Me.CurrentTarget.IsAboveTheGround())
+                    {
+                    Logger.Write(Color.White, "{0} is {1:F1) yds above the ground! using Ranged attack....", Me.CurrentTarget.SafeName(), Me.CurrentTarget.HeightOffTheGround());
+                    return true;
+                    }
+*/
+                    double heightCheck = Me.CurrentTarget.MeleeDistance();
+                    if (Me.CurrentTarget.Distance2DSqr < heightCheck * heightCheck && Math.Abs(Me.Z - Me.CurrentTarget.Z) >= heightCheck )
+                    {
+                        Logger.Write(Color.White, "Ranged Attack: {0} appears to be off the ground! using Ranged attack....", Me.CurrentTarget.SafeName());
+                        return true;
+                    }
+                    
+                    WoWPoint dest = Me.CurrentTarget.Location;
+                    if (!Me.CurrentTarget.IsWithinMeleeRange && !Styx.Pathing.Navigator.CanNavigateFully(Me.Location, dest))
+                    {
+                        Logger.Write(Color.White, "Ranged Attack: {0} is not Fully Pathable! using ranged attack....", Me.CurrentTarget.SafeName());
+                        return true;
+                    }
+
+                    return false;
+                },
+                new PrioritySelector(
+                    Spell.Cast("Heroic Throw"),
+                    new Sequence(
+                        new PrioritySelector(
+                            Movement.CreateEnsureMovementStoppedBehavior( 27f, on => Me.CurrentTarget, reason: "To cast Throw"),
+                            new ActionAlwaysSucceed()
+                            ),
+                        new Wait( 1, until => !Me.IsMoving, new ActionAlwaysSucceed()),
+                        Spell.Cast("Throw")
+                        )
+                    )
+                );
+        }
     }
 
     enum WarriorTalents

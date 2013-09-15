@@ -30,6 +30,7 @@ namespace Singular.ClassSpecific.Rogue
     {
         private static LocalPlayer Me { get { return StyxWoW.Me; } }
         private static RogueSettings RogueSettings { get { return SingularSettings.Instance.Rogue(); } }
+        private static bool HasTalent(RogueTalents tal) { return TalentManager.IsSelected((int)tal); } 
 
         #region Normal Rotation
 
@@ -37,29 +38,29 @@ namespace Singular.ClassSpecific.Rogue
         public static Composite CreateAssaRoguePull()
         {
             return new PrioritySelector(
-                Common.CreateRoguePullBuffs(),      // needed because some Bots not calling this behavior
-
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
                 Helpers.Common.CreateDismount("Pulling"),
+                Common.CreateRoguePullBuffs(),      // needed because some Bots not calling this behavior
+                Safers.EnsureTarget(),
+                Common.CreateRogueControlNearbyEnemyBehavior(),
+                Common.CreateRogueMoveBehindTarget(),
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
                 Spell.WaitForCastOrChannel(),
+
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown() && Me.GotTarget && Me.IsSafelyFacing(Me.CurrentTarget),
                     new PrioritySelector(
 
                         new Action(ret => { Me.CurrentTarget.TimeToDeath(); return RunStatus.Failure; }),
 
-                        //CreateAssaDiagnosticOutputBehavior("Pull"),
+                        CreateAssaDiagnosticOutputBehavior("Pull"),
                         Common.CreateRogueOpenerBehavior(),
-                        Common.CreateAttackFlyingMobs(),
 
-                        Spell.Cast("Mutilate")
+                        Common.CreatePullMobMovingAwayFromMe(),
+                        Common.CreateAttackFlyingOrUnreachableMobs(),
+
+                        Spell.Cast("Mutilate", req => Common.HasTwoDaggers )
                         )
-                    ),
-
-                Movement.CreateMoveBehindTargetBehavior(),
-                Movement.CreateMoveToMeleeBehavior(true)
+                    )
                 );
         }
         [Behavior(BehaviorType.Combat, WoWClass.Rogue, WoWSpec.RogueAssassination, WoWContext.Normal | WoWContext.Battlegrounds )]
@@ -67,8 +68,9 @@ namespace Singular.ClassSpecific.Rogue
         {
             return new PrioritySelector(
                 Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
+                Common.CreateRogueMoveBehindTarget(),
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
+
                 Helpers.Common.CreateAutoAttack(true),
 
                 Spell.WaitForCastOrChannel(),
@@ -78,9 +80,9 @@ namespace Singular.ClassSpecific.Rogue
 
                         // updated time to death tracking values before we need them
                         new Action(ret => { Me.CurrentTarget.TimeToDeath(); return RunStatus.Failure; }),
-                        CreateAssaDiagnosticOutputBehavior("Combat"),
 
                         Helpers.Common.CreateInterruptBehavior(),
+                        Common.CreateDismantleBehavior(),
 
                         Spell.Buff("Vendetta", ret => Me.CurrentTarget.IsPlayer || Me.CurrentTarget.Elite || Me.CurrentTarget.IsBoss() || Common.AoeCount > 1),
 
@@ -92,8 +94,8 @@ namespace Singular.ClassSpecific.Rogue
                                 Spell.Cast("Slice and Dice", on => Me, ret => Me.ComboPoints > 0 && Me.HasAuraExpired("Slice and Dice", 2)),
                                 Spell.Buff("Rupture", true, ret => (Me.CurrentTarget.GetAuraTimeLeft("Rupture", true).TotalSeconds < 3)),
                                 Spell.Cast("Crimson Tempest", ret => Me.ComboPoints >= 5),
-                                Spell.BuffSelf("Fan of Knives", ret => Common.AoeCount >= RogueSettings.FanOfKnivesCount ),
-                                Spell.Cast("Mutilate", ret => !SpellManager.HasSpell("Fan of Knives")),
+                                Spell.BuffSelf("Fan of Knives", ret => !Me.CurrentTarget.IsPlayer && Common.AoeCount >= RogueSettings.FanOfKnivesCount ),
+                                Spell.Cast("Mutilate", ret => !SpellManager.HasSpell("Fan of Knives") && Common.HasTwoDaggers),
                                 Movement.CreateMoveToMeleeBehavior(true)
                                 )
                             ),
@@ -109,26 +111,14 @@ namespace Singular.ClassSpecific.Rogue
                                 )
                             ),
 
-                        Spell.Cast("Dispatch"), // daggers
+                        Spell.Cast("Dispatch", req => Common.HasDaggerInMainHand), // daggers
 
-                        Spell.BuffSelf("Fan of Knives", ret => Common.AoeCount >= RogueSettings.FanOfKnivesCount ),
-                        Spell.Cast("Mutilate"),  // daggers
+                        Spell.BuffSelf("Fan of Knives", ret => !Me.CurrentTarget.IsPlayer && Common.AoeCount >= RogueSettings.FanOfKnivesCount),
+                        Spell.Cast("Mutilate", req => Common.HasTwoDaggers),  // daggers
 
-                        new ThrottlePasses(60,
-                            new PrioritySelector(
-                                new Decorator(
-                                    ret => !Me.Disarmed && !Common.HasDaggerInMainHand && SpellManager.HasSpell("Dispatch"),
-                                    new Action(ret => Logger.Write(Color.HotPink, "config error: cannot cast Dispatch without Dagger in Mainhand"))
-                                    ),
-                                new Decorator(
-                                    ret => !Me.Disarmed && !Common.HasTwoDaggers && SpellManager.HasSpell("Mutilate"),
-                                    new Action(ret => Logger.Write(Color.HotPink, "config error: cannot cast Mutilate without two Daggers"))
-                                    )
-                                )
-                            )
+                        Common.CheckThatDaggersAreEquippedIfNeeded()
                         )
-                    ),
-                Movement.CreateMoveToMeleeBehavior(true)
+                    )
                 );
         }
 
@@ -140,8 +130,8 @@ namespace Singular.ClassSpecific.Rogue
         {
             return new PrioritySelector(
                 Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
+                Common.CreateRogueMoveBehindTarget(),
+                Helpers.Common.EnsureReadyToAttackFromMelee(),
 
                 Spell.WaitForCastOrChannel(),
                 new Decorator(
@@ -150,9 +140,9 @@ namespace Singular.ClassSpecific.Rogue
 
                         // updated time to death tracking values before we need them
                         new Action(ret => { Me.CurrentTarget.TimeToDeath(); return RunStatus.Failure; }),
-                       // CreateAssaDiagnosticOutputBehavior("Combat"),
 
                         Helpers.Common.CreateInterruptBehavior(),
+                        Common.CreateDismantleBehavior(),
 
                         // Agro management
                         Spell.Cast(
@@ -163,37 +153,43 @@ namespace Singular.ClassSpecific.Rogue
                         // Common.CreateRogueFeintBehavior(),
 
                         new Decorator(
-                            ret => Common.AoeCount >= 3 ,
+                            ret => Common.AoeCount >= 3 && Spell.UseAOE,
                             new PrioritySelector(
-                                Spell.BuffSelf("Fan of Knives", ret => Common.AoeCount >= RogueSettings.FanOfKnivesCount),
                                 Spell.Cast("Slice and Dice", on => Me, ret => Me.ComboPoints > 0 && Me.HasAuraExpired("Slice and Dice", 2)),
                                 Spell.Buff("Rupture", true, ret => (Me.CurrentTarget.GetAuraTimeLeft("Rupture", true).TotalSeconds < 3)),
                                 Spell.Cast("Crimson Tempest", ret => Me.ComboPoints >= 5),
-                                
-                                Spell.Cast("Mutilate", ret => !SpellManager.HasSpell("Fan of Knives")),
+                                Spell.BuffSelf("Fan of Knives", ret => Common.AoeCount >= RogueSettings.FanOfKnivesCount ),
+                                Spell.Cast("Mutilate", ret => !SpellManager.HasSpell("Fan of Knives") && Common.HasTwoDaggers ),
                                 Movement.CreateMoveToMeleeBehavior(true)
                                 )
                             ),
 
-                        Movement.CreateMoveBehindTargetBehavior(),
-
-                        Spell.Cast("Ambush", ret => Common.IsStealthed),
+                        Spell.Cast("Garrote", ret => Common.IsStealthed && Me.CurrentTarget.MeIsBehind),
                         Spell.Buff("Vendetta",  ret => Me.CurrentTarget.IsBoss() &&  (Me.CurrentTarget.HealthPercent < 35 || TalentManager.IsSelected(13))),
-                        Spell.BuffSelf("Fan of Knives", ret => Common.AoeCount >= RogueSettings.FanOfKnivesCount),
-                        Spell.Cast("Slice and Dice", on => Me, ret => Me.ComboPoints > 1 && Me.HasAuraExpired("Slice and Dice", 2)),
+
+                        Spell.Cast("Slice and Dice", on => Me, ret => Me.ComboPoints > 0 && Me.HasAuraExpired("Slice and Dice", 2)),
                         Spell.Buff("Rupture", true, ret => (Me.CurrentTarget.GetAuraTimeLeft("Rupture", true).TotalSeconds < 3)),
                         Spell.Buff("Envenom", true, ret => (Me.GetAuraTimeLeft("Slice and Dice", true).TotalSeconds < 3 && Me.ComboPoints > 0) || Me.ComboPoints == 5),
-                        Spell.Cast("Dispatch"),                   
-                        Spell.Cast("Mutilate")
-                        )
-                    ),
+                        Spell.Cast("Dispatch", req => Common.HasDaggerInMainHand),
 
-                Movement.CreateMoveToMeleeBehavior(true)
+                        Spell.BuffSelf("Fan of Knives", ret => Common.AoeCount >= RogueSettings.FanOfKnivesCount ),
+                        Spell.Cast("Mutilate", req => Common.HasTwoDaggers),
+
+                        Common.CheckThatDaggersAreEquippedIfNeeded(),
+                        Common.CreateRogueMoveBehindTarget()
+                        )
+                    )
                 );
         }
 
         #endregion
 
+
+        [Behavior(BehaviorType.Heal, WoWClass.Rogue, WoWSpec.RogueAssassination, priority:99)]
+        public static Composite CreateRogueHeal()
+        {
+            return CreateAssaDiagnosticOutputBehavior("Combat");
+        }
 
         private static Composite CreateAssaDiagnosticOutputBehavior(string sState = "")
         {

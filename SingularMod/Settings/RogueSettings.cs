@@ -11,7 +11,7 @@ namespace Singular.Settings
     internal class RogueSettings : Styx.Helpers.Settings
     {
         public RogueSettings()
-            : base(Path.Combine(SingularSettings.SettingsPath, "Rogue.xml"))
+            : base(Path.Combine(SingularSettings.SingularSettingsPath, "Rogue.xml"))
         {
         }
 
@@ -19,7 +19,7 @@ namespace Singular.Settings
         [DefaultValue(false)]
         [Category("Common")]
         [DisplayName("Use Sprint")]
-        [Description("Sprint to close destinations or when unable to mount")]
+        [Description("Sprint to close to target during Pull or Combat")]
         public bool UseSprint { get; set; }
 
         [Setting]
@@ -43,9 +43,22 @@ namespace Singular.Settings
         [Description("Non Lethal Poison")]
         public NonLethalPoisonType NonLethalPoison { get; set; }
 
+        [Setting]
+        [DefaultValue(false)]
+        [Category("Common")]
+        [DisplayName("Stealth Always")]
+        [Description("Stealth at all times out of combat. Does not disable mounting (you can in HB Settings if desired)")]
+        public bool StealthAlways { get; set; }
 
         [Setting]
-        [DefaultValue(2)]
+        [DefaultValue(true)]
+        [Category("Common")]
+        [DisplayName("Stealth When Eating")]
+        [Description("Stealth if eating food")]
+        public bool StealthIfEating { get; set; }
+
+        [Setting]
+        [DefaultValue(4)]
         [Category("Common")]
         [DisplayName("Fan of Knives Count")]
         [Description("Use FoK as Combo Point builder at this enemy count")]
@@ -75,16 +88,23 @@ namespace Singular.Settings
         [Setting]
         [DefaultValue(true)]
         [Category("Common")]
-        [DisplayName("Use Pick Pocket")]
-        [Description("Requires AutoLoot ON; pick pocket mob before opener")]
-        public bool UsePickPocket { get; set; }
+        [DisplayName("Use Pick Lock")]
+        [Description("Requires AutoLoot ON; unlock boxes in bags during rest")]
+        public bool UsePickLock { get; set; }
+
+        [Setting]
+        [DefaultValue(25)]
+        [Category("Common")]
+        [DisplayName("Sap Adds Distance")]
+        [Description("Sap mobs within this many yards of target that may aggro; 0 to disable")]
+        public int SapAddDistance { get; set; }
 
         [Setting]
         [DefaultValue(true)]
         [Category("Common")]
-        [DisplayName("Use Pick Lock")]
-        [Description("Requires AutoLoot ON; unlock boxes in bags during rest")]
-        public bool UsePickLock { get; set; }
+        [DisplayName("Sap target if moving")]
+        [Description("Sap target that is moving to avoid having to follow while stealthed")]
+        public bool SapMovingTargetsOnPull { get; set; }
 
 
         [Setting]
@@ -93,6 +113,13 @@ namespace Singular.Settings
         [DisplayName("Use Rupture Finisher")]
         [Description("Use Rupture Finisher")]
         public bool CombatUseRuptureFinisher { get; set; }
+
+        [Setting]
+        [DefaultValue(false)]
+        [Category("Common")]
+        [DisplayName("Move Behind Targets")]
+        [Description("Move behind targets for opener or when target stunned/not targeting Rogue")]
+        public bool MoveBehindTargets { get; set; }
 
         [Setting]
         [DefaultValue(true)]
@@ -108,5 +135,39 @@ namespace Singular.Settings
         [Description("Cast Burst of Speed when running out of combat")]
         public bool UseSpeedBuff { get; set; }
 
+        [Setting]
+        [DefaultValue(true)]
+        [Category("Pick Pocket")]
+        [DisplayName("Use Pick Pocket")]
+        [Description("Requires AutoLoot ON; pick pocket mob before opener")]
+        public bool UsePickPocket { get; set; }
+
+        [Setting]
+        [DefaultValue(200)]
+        [Category("Pick Pocket")]
+        [DisplayName("Post-Pick Pocket Pause")]
+        [Description("Milliseconds to pause after Pick Pocket (for systems with a slow Auto Loot reaction since Pick Pocket has no GCD)")]
+        public int PostPickPocketPause { get; set; }
+
+        [Setting]
+        [DefaultValue(100)]
+        [Category("Pick Pocket")]
+        [DisplayName("Pre-Pick Pocket ms Pause")]
+        [Description("Milliseconds to pause before Pick Pocket (for systems with lag)")]
+        public int PrePickPocketPause { get; set; }
+
+        [Setting]
+        [DefaultValue(false)]
+        [Category("Pick Pocket")]
+        [DisplayName("Allow Pick Pocket in Combat")]
+        [Description("Allow use in Combat on Current Target if spell usable and current target valid")]
+        public bool AllowPickPocketInCombat { get; set; }
+
+        [Setting]
+        [DefaultValue(false)]
+        [Category("General")]
+        [DisplayName("Use Dismantle")]
+        [Description("True: use Dismantle on cooldown; False: do not cast")]
+        public bool UseDimantle { get; set; }
     }
 }

@@ -26,19 +26,19 @@ namespace Singular.ClassSpecific.Mage
 
         #region Normal Rotation
 
-        [Behavior(BehaviorType.Pull | BehaviorType.Combat, WoWClass.Mage, WoWSpec.MageArcane, WoWContext.Normal )]
-        public static Composite CreateMageArcaneNormalCombat()
+        private static bool useArcaneNow;
+
+        [Behavior(BehaviorType.Pull, WoWClass.Mage, WoWSpec.MageArcane, WoWContext.Normal)]
+        public static Composite CreateMageArcaneNormalPull()
         {
             return new PrioritySelector(
                 Safers.EnsureTarget(),
                 Common.CreateStayAwayFromFrozenTargetsBehavior(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
-                Spell.WaitForCast(true),
+                Spell.WaitForCastOrChannel(),
 
-                new Decorator( 
+                new Decorator(
                     ret => !Spell.IsGlobalCooldown(),
                     new PrioritySelector(
 
@@ -49,6 +49,79 @@ namespace Singular.ClassSpecific.Mage
 
                         Spell.BuffSelf("Arcane Power"),
 
+                        new Action(r =>
+                        {
+                            useArcaneNow = false;
+                            uint ac = Me.GetAuraStacks("Arcane Charge");
+                            if (ac >= 4)
+                                useArcaneNow = true;
+                            else
+                            {
+                                long ttd = Me.CurrentTarget.TimeToDeath();
+                                if (ttd > 6)
+                                    useArcaneNow = ac >= 2;
+                                else if (ttd > 3)
+                                    useArcaneNow = ac >= 1;
+                                else
+                                    useArcaneNow = ttd >= 0;
+                            }
+                            return RunStatus.Failure;
+                        }),
+
+                        Spell.Cast("Arcane Missiles", ret => useArcaneNow && Me.HasAura("Arcane Missiles!")),
+                        Spell.Cast("Arcane Barrage", ret => useArcaneNow),
+
+                        // grinding or questing, if target meets these cast Flame Shock if possible
+                        // 1. mob is less than 12 yds, so no benefit from delay in Lightning Bolt missile arrival
+                        // 2. area has another player competing for mobs (we want to tag the mob quickly)
+                        new Decorator(
+                            ret => StyxWoW.Me.CurrentTarget.Distance < 12
+                                || ObjectManager.GetObjectsOfType<WoWPlayer>(true, false).Any(p => p.Location.DistanceSqr(StyxWoW.Me.CurrentTarget.Location) <= 40 * 40),
+                            new PrioritySelector(
+                                Spell.Cast("Fire Blast"),
+                                Spell.Cast("Arcane Barrage")
+                                )
+                            ),
+
+                        Spell.Cast("Arcane Blast"),
+
+                        Spell.Cast("Frostfire Bolt", ret => !SpellManager.HasSpell("Arcane Blast"))
+                        )
+                    ),
+
+                Movement.CreateMoveToUnitBehavior(on => StyxWoW.Me.CurrentTarget, 39f, 34f)
+                );
+        }
+
+        [Behavior(BehaviorType.Heal, WoWClass.Mage, WoWSpec.MageArcane)]
+        public static Composite CreateMageArcaneHeal()
+        {
+            return new PrioritySelector(
+                CreateArcaneDiagnosticOutputBehavior("Combat")
+                );
+        }
+
+        [Behavior(BehaviorType.Combat, WoWClass.Mage, WoWSpec.MageArcane, WoWContext.Normal )]
+        public static Composite CreateMageArcaneNormalCombat()
+        {
+            return new PrioritySelector(
+                Safers.EnsureTarget(),
+                Common.CreateStayAwayFromFrozenTargetsBehavior(),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
+
+                Spell.WaitForCastOrChannel(),
+
+                new Decorator( 
+                    ret => !Spell.IsGlobalCooldown(),
+                    new PrioritySelector(
+
+                        Common.CreateMageAvoidanceBehavior(null, null),
+
+                        Helpers.Common.CreateAutoAttack(true),
+                        Helpers.Common.CreateInterruptBehavior(),
+
+                        Spell.BuffSelf("Arcane Power"),
+/*
                         new Decorator(
                             ret => !Unit.NearbyUnfriendlyUnits.Any(u => u.DistanceSqr < 10 * 10 && u.IsCrowdControlled()),
                             new PrioritySelector(
@@ -56,39 +129,51 @@ namespace Singular.ClassSpecific.Mage
                                     ret => Unit.NearbyUnfriendlyUnits.Any(u =>
                                                     u.DistanceSqr <= 8 * 8 && !u.IsFrozen() && !u.Stunned))
                                 )),
-
+*/
                         // AoE comes first
                         new Decorator(
                             ret => Spell.UseAOE && Me.Level >= 25 && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 3,
                             new PrioritySelector(
-                                Movement.CreateEnsureMovementStoppedBehavior(5f),
+                                // Movement.CreateEnsureMovementStoppedBehavior(5f),
                                 Spell.Cast("Fire Blast", ret => TalentManager.HasGlyph("Fire Blast") && Me.CurrentTarget.HasAnyAura("Frost Bomb", "Living Bomb", "Nether Tempest")),
                                 Spell.CastOnGround("Flamestrike", loc => Me.CurrentTarget.Location),
                                 Spell.Cast("Arcane Barrage", ret => Me.HasAura("Arcane Charge", Math.Min(6, Unit.UnfriendlyUnitsNearTarget(10f).Count()))),
                                 Spell.Cast("Arcane Explosion", ret => Unit.NearbyUnfriendlyUnits.Count(t => t.Distance <= 10) >= 3),
-                                Movement.CreateMoveToTargetBehavior(true, 8f)
+                                Movement.CreateMoveToUnitBehavior( on => StyxWoW.Me.CurrentTarget, 8f, 5f)
                                 )
                             ),
 
-                        Movement.CreateEnsureMovementStoppedBehavior(35f),
+                        // Movement.CreateEnsureMovementStoppedBehavior(35f),
                         Common.CreateMagePolymorphOnAddBehavior(),
 
                         Spell.BuffSelf("Evocation", ret => Me.ManaPercent < 30),
 
+                        new Action( r => {
+                            useArcaneNow = false;
+                            uint ac = Me.GetAuraStacks("Arcane Charge");
+                            if (ac >= 4)
+                                useArcaneNow = true;
+                            else
+                            {
+                                long ttd = Me.CurrentTarget.TimeToDeath();
+                                if (ttd > 6)
+                                    useArcaneNow = ac >= 2;
+                                else if (ttd > 3)
+                                    useArcaneNow = ac >= 1;
+                                else
+                                    useArcaneNow = ttd >= 0;
+                            }
+                            return RunStatus.Failure;
+                            }),
+
                         // Living Bomb in CombatBuffs()
-                        Spell.Cast("Arcane Blast",
-                            ret => !Me.IsMoving && (!Me.HasAura("Arcane Charge", 6) || Me.HasAuraExpired("Arcane Charge", 3))),
-                        Spell.Cast("Arcane Barrage",
-                            ret => Me.IsMoving && Me.HasAuraExpired("Arcane Charge", 2)),
-                        Spell.Cast("Arcane Missiles", ret => Me.HasAura("Arcane Missiles!", 2)),
-                        Spell.Cast("Arcane Blast", ret => Me.ManaPercent >= 90),
-                        // Spell.Cast("Scorch", ret => Me.ManaPercent < 90),
+                        Spell.Cast("Arcane Missiles", ret => useArcaneNow && Me.HasAura("Arcane Missiles!")),
+                        Spell.Cast("Arcane Barrage", ret => useArcaneNow),
+                        Spell.Cast("Arcane Blast"),
 
                         Spell.Cast("Frostfire Bolt", ret => !SpellManager.HasSpell("Arcane Blast"))
                         )
-                    ),
-
-                Movement.CreateMoveToTargetBehavior(true, 39f)
+                    )
                 );
         }
 
@@ -101,34 +186,31 @@ namespace Singular.ClassSpecific.Mage
             return new PrioritySelector(
                 Safers.EnsureTarget(),
                 Common.CreateStayAwayFromFrozenTargetsBehavior(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
+
+                Spell.WaitForCastOrChannel(),
+
+                new Decorator( 
+                    ret => !Spell.IsGlobalCooldown(),
+                    new PrioritySelector(
        
-                Spell.WaitForCast(true),
+                        Common.CreateMageAvoidanceBehavior(null, null),
 
-                // Defensive stuff
-                Spell.BuffSelf("Ice Block", ret => Me.HealthPercent < 10 && !Me.ActiveAuras.ContainsKey("Hypothermia")),
-                Spell.BuffSelf("Mana Shield", ret => Me.HealthPercent <= 75),
-                Spell.BuffSelf("Frost Nova", ret => Unit.NearbyUnfriendlyUnits.Any(u => u.Distance <= 11 && !u.IsFrozen())),
-                Common.CreateMagePolymorphOnAddBehavior(),
+                        // Defensive stuff
+                        Spell.BuffSelf("Ice Block", ret => Me.HealthPercent < 10 && !Me.ActiveAuras.ContainsKey("Hypothermia")),
+                        Spell.BuffSelf("Frost Nova", ret => Unit.NearbyUnfriendlyUnits.Any(u => u.Distance <= 11 && !u.IsFrozen())),
+                        Common.CreateMagePolymorphOnAddBehavior(),
 
-
-
-
-
-                Spell.BuffSelf("Mana Shield", ret => Me.ManaPercent < 30),
-                Spell.BuffSelf("Evocation", ret => Me.ManaPercent < 30 && (Me.HasAura("Mana Shield") || !SpellManager.HasSpell("Mana Shield"))),
-                Spell.BuffSelf("Arcane Power"),
-                Spell.BuffSelf("Mirror Image"),
-                Spell.BuffSelf("Flame Orb"),
-                Spell.Cast("Arcane Missiles", ret => Me.HasAura("Arcane Missiles!")),
-                Spell.Cast("Arcane Barrage", ret => Me.GetAuraByName("Arcane Charge") != null && Me.GetAuraByName("Arcane Charge").StackCount >= 4),
-                Spell.Cast("Frostfire Bolt", ret => !SpellManager.HasSpell("Arcane Blast")),
-                Spell.Cast("Arcane Blast"),
-                Movement.CreateMoveToTargetBehavior(true, 39f)
-                
+                        Spell.BuffSelf("Evocation", ret => Me.ManaPercent < 30),
+                        Spell.BuffSelf("Arcane Power"),
+                        Spell.BuffSelf("Mirror Image"),
+                        Spell.BuffSelf("Flame Orb"),
+                        Spell.Cast("Arcane Missiles", ret => Me.HasAura("Arcane Missiles!")),
+                        Spell.Cast("Arcane Barrage", ret => Me.GetAuraByName("Arcane Charge") != null && Me.GetAuraByName("Arcane Charge").StackCount >= 4),
+                        Spell.Cast("Frostfire Bolt", ret => !SpellManager.HasSpell("Arcane Blast")),
+                        Spell.Cast("Arcane Blast")
+                        )
+                    )
                 );
         }
         
@@ -141,18 +223,13 @@ namespace Singular.ClassSpecific.Mage
         public static Composite CreateMageArcaneInstancePullAndCombat()
         {
             return new PrioritySelector(
-                Safers.EnsureTarget(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
-                Spell.WaitForCast(true),
+                Spell.WaitForCastOrChannel(FaceDuring.Yes),
 
                 new Decorator( 
                     ret => !Spell.IsGlobalCooldown(),
                     new PrioritySelector(
-
-                        CreateArcaneDiagnosticOutputBehavior(),
 
                         Helpers.Common.CreateAutoAttack(true),
                         Helpers.Common.CreateInterruptBehavior(),
@@ -163,23 +240,23 @@ namespace Singular.ClassSpecific.Mage
                         new Decorator(
                             ret => Spell.UseAOE && Me.Level >= 25 && Unit.UnfriendlyUnitsNearTarget(10f).Count() >= 3,
                             new PrioritySelector(
-                                Movement.CreateEnsureMovementStoppedBehavior(5f),
+                                // Movement.CreateEnsureMovementStoppedBehavior(5f),
                                 Spell.Cast("Fire Blast", ret => TalentManager.HasGlyph("Fire Blast") && Me.CurrentTarget.HasAnyAura("Frost Bomb", "Living Bomb", "Nether Tempest")),
                                 Spell.CastOnGround("Flamestrike", loc => Me.CurrentTarget.Location),
                                 Spell.Cast("Arcane Barrage", ret => Me.HasAura( "Arcane Charge", Math.Min( 6, Unit.UnfriendlyUnitsNearTarget(10f).Count()))),
                                 Spell.Cast("Arcane Explosion", ret => Unit.NearbyUnfriendlyUnits.Count(t => t.Distance <= 10) >= 3),
-                                Movement.CreateMoveToTargetBehavior(true, 8f)
+                                Movement.CreateMoveToUnitBehavior( on => StyxWoW.Me.CurrentTarget, 8f, 5f)
                                 )
                             ),
 
-                        Movement.CreateEnsureMovementStoppedBehavior(35f),
+                        // Movement.CreateEnsureMovementStoppedBehavior(35f),
                         Spell.BuffSelf("Evocation", ret => Me.ManaPercent < 30),
 
                         // Living Bomb in CombatBuffs()
                         Spell.Cast("Arcane Blast", 
-                            ret => !Me.IsMoving && (!Me.HasAura("Arcane Charge", 6) || Me.HasAuraExpired("Arcane Charge", 3))),
+                            ret => !Me.HasAura("Arcane Charge", 6) || Me.HasAuraExpired("Arcane Charge", 3)),
                         Spell.Cast("Arcane Barrage",  
-                            ret => Me.IsMoving && Me.HasAuraExpired("Arcane Charge", 2)),
+                            ret => Me.IsMoving && !Spell.HaveAllowMovingWhileCastingAura() && Me.HasAuraExpired("Arcane Charge", 2)),
                         Spell.Cast("Arcane Missiles", ret => Me.HasAura("Arcane Missiles!", 2)),
                         Spell.Cast("Arcane Blast", ret => Me.ManaPercent >= 90),
                         // Spell.Cast("Scorch", ret => Me.ManaPercent < 90),
@@ -188,7 +265,7 @@ namespace Singular.ClassSpecific.Mage
                         )
                     ),
 
-                Movement.CreateMoveToTargetBehavior(true, 39f)
+                Movement.CreateMoveToUnitBehavior( on => StyxWoW.Me.CurrentTarget, 39f, 34f)
                 );
         }
 
@@ -196,15 +273,16 @@ namespace Singular.ClassSpecific.Mage
 
         #region Diagnostics
 
-        private static Composite CreateArcaneDiagnosticOutputBehavior()
+        private static Composite CreateArcaneDiagnosticOutputBehavior(string state = null)
         {
             if (!SingularSettings.Debug)
                 return new ActionAlwaysFail();
 
-            return new Throttle(1,
+            return new ThrottlePasses(1, 1,
                 new Action(ret =>
                 {
-                    string line = string.Format(".... h={0:F1}%/m={1:F1}%, moving={2}, arcchg={3} {4:F0} ms, arcmiss={5} {6:F0} ms",
+                    string line = string.Format(".... [{0}] h={1:F1}%/m={2:F1}%, moving={3}, arcchg={4} {5:F0} ms, arcmiss={6} {7:F0} ms",
+                        state ?? Dynamics.CompositeBuilder.CurrentBehaviorType.ToString(),
                         Me.HealthPercent,
                         Me.ManaPercent,
                         Me.IsMoving,
@@ -228,7 +306,7 @@ namespace Singular.ClassSpecific.Mage
                             );
 
                     Logger.WriteDebug(Color.Wheat, line);
-                    return RunStatus.Success;
+                    return RunStatus.Failure;
                 })
                 );
         }

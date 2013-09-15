@@ -31,60 +31,42 @@ namespace Singular.ClassSpecific.Mage
 
         public static bool IsFrozen(this WoWUnit unit)
         {
-            return unit.GetAllAuras().Any(a => a.Spell.Mechanic == WoWSpellMechanic.Frozen || (a.Spell.School == WoWSpellSchool.Frost && a.Spell.SpellEffects.Any(e => e.AuraType == WoWApplyAuraType.ModRoot)));
+            return Me.HasAura("Brain Freeze") || unit.GetAllAuras().Any(a => a.Spell.Mechanic == WoWSpellMechanic.Frozen || (a.Spell.School == WoWSpellSchool.Frost && a.Spell.SpellEffects.Any(e => e.AuraType == WoWApplyAuraType.ModRoot)));
         }
 
         [Behavior(BehaviorType.PreCombatBuffs, WoWClass.Mage)]
         public static Composite CreateMagePreCombatBuffs()
         {
             return new PrioritySelector(
-                Spell.WaitForCast(),
+                Spell.WaitForCastOrChannel(),
                 new Decorator(
                     ret => !Spell.IsGlobalCooldown(),
                     new PrioritySelector(
+
+                        // Defensive 
+                        Spell.BuffSelf("Slow Fall", req => MageSettings.UseSlowFall && Me.IsFalling),
 
                         PartyBuff.BuffGroup("Dalaran Brilliance", "Arcane Brilliance"),
                         PartyBuff.BuffGroup("Arcane Brilliance", "Dalaran Brilliance"),
 
                         // Additional armors/barriers for BGs. These should be kept up at all times to ensure we're as survivable as possible.
+                        /*
                         new Decorator(
                             ret => SingularRoutine.CurrentWoWContext == WoWContext.Battlegrounds,
                             new PrioritySelector(
-
-                                // only FA if in battlegrounds or we have move slightly since last FA (to avoid repeated casts in place when stuck)
-                                Spell.BuffSelf("Frost Armor", ret => {
-                                    if (SingularRoutine.CurrentWoWContext != WoWContext.Battlegrounds && Me.Location.Distance(locLastFrostArmor) < 1)
-                                        return false;
-                                    locLastFrostArmor = Me.Location;
-                                    return true;
-                                    } ),
-
-                                // Spell.BuffSelf("Mage Armor", ret => !Me.HasAura("Frost Armor")), 
-
-
                                 // Don't put up mana shield if we're arcane. Since our mastery works off of how much mana we have!
                                 Spell.BuffSelf("Mana Shield", ret => TalentManager.CurrentSpec != WoWSpec.MageArcane)
                                 )
                             ),
-
-                        // Outside of BGs, we really only have 2 choices of armor. Molten, or mage. Mage for arcane, molten for frost/fire.
-                        new Throttle( 3,
-                            new Decorator(
-                                ret => (SingularRoutine.CurrentWoWContext & WoWContext.Battlegrounds) == 0,
-                                new PrioritySelector(
-                    // Arcane is a mana whore, we want molten if we don't have mage yet. Otherwise, stick with Mage armor.
-                                    Spell.BuffSelf("Molten Armor", ret => (TalentManager.CurrentSpec != WoWSpec.MageArcane || !SpellManager.HasSpell("Mage Armor"))),
-                                    Spell.BuffSelf("Mage Armor", ret => TalentManager.CurrentSpec == WoWSpec.MageArcane)
-                                    )
-                                )
-                            ),
+                        */
+                        CreateMageArmorBehavior(),
 
                         new PrioritySelector(
                             ctx => MageTable,
                             new Decorator(
-                                ctx => ctx != null && CarriedMageFoodCount < 80 && StyxWoW.Me.FreeNormalBagSlots > 1,
+                                ctx => ctx != null && CarriedMageFoodCount < 60 && StyxWoW.Me.FreeNormalBagSlots > 1,
                                 new Sequence(
-                                    new Action(ctx => Logger.Write("Getting Mage food")),
+                                    new Action(ctx => Logger.Write(Color.White, "^Getting Mage food")),
                 // Move to the Mage table
                                     new DecoratorContinue(
                                         ctx => ((WoWGameObject)ctx).DistanceSqr > 5 * 5,
@@ -98,15 +80,16 @@ namespace Singular.ClassSpecific.Mage
                             ),
 
                         new Decorator(
-                            ctx => ShouldSummonTable && (!Gotfood || NeedTableForBattleground) && SpellManager.CanCast("Conjure Refreshment Table"),
+                            ctx => ShouldSummonTable && (!Gotfood || NeedTableForBattleground) && Spell.CanCastHack("Conjure Refreshment Table"),
                             new Sequence(
                                 new DecoratorContinue(
                                     ctx => StyxWoW.Me.IsMoving,
                                     new Sequence(
-                                        new Action(ctx => WoWMovement.MoveStop()),
+                                        new Action(ctx => StopMoving.Now()),
                                         new WaitContinue(2, ctx => !StyxWoW.Me.IsMoving, new ActionAlwaysSucceed())
                                         )
                                     ),
+                                new Action(ctx => Logger.Write(Color.White, "^Conjure Refreshment Table")),
                                 new Action(ctx => SpellManager.Cast("Conjure Refreshment Table")),
                                 new WaitContinue(2, ctx => StyxWoW.Me.IsCasting, new ActionAlwaysSucceed()),
                                 new WaitContinue(10, ctx => !StyxWoW.Me.IsCasting, new ActionAlwaysSucceed())
@@ -117,7 +100,7 @@ namespace Singular.ClassSpecific.Mage
                         Spell.BuffSelf("Conjure Mana Gem", ret => !HaveManaGem )
 /*
                         new Throttle( 1,
-                            new Decorator(ret => !HaveManaGem && SpellManager.CanCast("Conjure Mana Gem"),
+                            new Decorator(ret => !HaveManaGem && Spell.CanCastHack("Conjure Mana Gem"),
                                 new Sequence(
                                     new Action(ret => Logger.Write("Casting Conjure Mana Gem")),
                                     new Action(ret => SpellManager.Cast(759))
@@ -163,86 +146,62 @@ namespace Singular.ClassSpecific.Mage
         [Behavior(BehaviorType.CombatBuffs, WoWClass.Mage)]
         public static Composite CreateMageCombatBuffs()
         {
-            return new PrioritySelector(
-                // Defensive 
+            return new Decorator(
+                req => !Unit.IsTrivial(Me.CurrentTarget),
+                new PrioritySelector(
+                    // Defensive 
+                    Spell.BuffSelf( "Slow Fall", req => MageSettings.UseSlowFall && Me.IsFalling ),
+                        
+                    // handle Cauterize debuff if we took talent and get it
+                    new Decorator(
+                        ret => Me.ActiveAuras.ContainsKey("Cauterize"),
+                        new PrioritySelector(
+                            Spell.BuffSelf("Ice Block",
+                                ret => { 
+                                    _cancelIceBlockForCauterize = DateTime.Now.AddSeconds(10);
+                                    return true;
+                                }),
 
-                // handle Cauterize debuff if we took talent and get it
-                new Decorator(
-                    ret => Me.ActiveAuras.ContainsKey("Cauterize"),
-                    new PrioritySelector(
-                        Spell.BuffSelf("Ice Block",
-                            ret => {
-                                _cancelIceBlockForCauterize = DateTime.Now.AddSeconds(10);
-                                return true;
-                            }),
+                            Spell.BuffSelf("Temporal Shield"),
+                            Spell.BuffSelf("Ice Barrier"),
+                            Spell.BuffSelf("Incanter's Ward"),
 
-                        Spell.BuffSelf("Temporal Shield"),
-                        Spell.BuffSelf("Ice Barrier"),
-                        Spell.BuffSelf("Incanter's Ward"),
-                        Spell.BuffSelf("Evocation"),
-                        new Decorator(
-                            req => !Me.HasAnyAura( "Invoker's Energy", "Incanter's Ward"),
                             new Throttle( 8, Item.CreateUsePotionAndHealthstone(100, 0))
                             )
-                        )
-                    ),
-
-                // Ice Block cast if we didn't take Cauterize
-                Spell.BuffSelf("Ice Block",
-                    ret => SingularRoutine.CurrentWoWContext != WoWContext.Instances
-                        && !SpellManager.HasSpell("Cauterize")
-                        && StyxWoW.Me.HealthPercent < 20
-                        && !StyxWoW.Me.ActiveAuras.ContainsKey("Hypothermia")),
-
-                 Spell.Buff(
-                    "Evocation", true, on => Me, 
-                    ret => Me.ManaPercent < 30 
-                        || Me.HealthPercent < 30  
-                        || (Me.HealthPercent < 60 && 2 <= Unit.NearbyUnfriendlyUnits.Count( u => u.Combat && u.IsTargetingMeOrPet )),
-                    "Invoker's Energy"
-                    ),
-
-                Spell.BuffSelf("Incanter's Ward", req => Unit.NearbyUnitsInCombatWithMe.Any()),
-
-                CreateMageSpellstealBehavior(),
-
-                Spell.Cast("Ice Barrier", on => Me, ret => Me.HasAuraExpired("Ice Barrier", 2)),
-
-                new Throttle( TimeSpan.FromMilliseconds(10000), Spell.CastOnGround("Rune of Power", loc => Me.Location, req => !Me.HasAura("Rune of Power"), false) ),
-
-                //  Spell.CastOnGround("Rune of Power", loc => Me.Location.RayCast(Me.RenderFacing, 1.25f), ret => !Me.IsMoving),
-
-                Spell.Cast("Nether Tempest", ret => Me.GotTarget && Me.CurrentTarget.HasAuraExpired("Nether Tempest", 3)),
-                Spell.Cast("Living Bomb", ret => Me.GotTarget && Me.CurrentTarget.HasAuraExpired("Living Bomb", 2)),
-                Spell.Cast("Frost Bomb", ret => Me.GotTarget && !Me.CurrentTarget.HasMyAura("Frost Bomb")),
-
-                // Spell.Cast("Alter Time", ret => StyxWoW.Me.HasAura("Icy Veins") && StyxWoW.Me.HasAura("Brain Freeze") && StyxWoW.Me.HasAura("Fingers of Frost") && StyxWoW.Me.HasAura("Invoker's Energy")),
-
-                Spell.Cast("Mirror Image", 
-                    req => Me.GotTarget &&  (Me.CurrentTarget.IsBoss() || (Me.CurrentTarget.Elite && SingularRoutine.CurrentWoWContext != WoWContext.Instances) || Me.CurrentTarget.IsPlayer || Unit.NearbyUnitsInCombatWithMe.Count() >= 3)),
-
-                Spell.BuffSelf("Time Warp", ret => MageSettings.UseTimeWarp && NeedToTimeWarp),
-
-                Common.CreateUseManaGemBehavior(ret => Me.ManaPercent < (SingularRoutine.CurrentWoWContext == WoWContext.Instances ? 20 : 80))
-                
-                // , Spell.BuffSelf( "Ice Floes", req => Me.IsMoving)
-
-                );
-        }
-
-        private static Composite CreateSlowMeleeBehavior()
-        {
-            return new Decorator(
-                ret => Unit.NearbyUnfriendlyUnits.Any(u => u.SpellDistance() <= 8 && !u.Stunned && !u.Rooted && !u.IsSlowed()),
-                new PrioritySelector(
-                    new Decorator(
-                        ret => Me.Specialization == WoWSpec.MageFrost,
-                        Mage.Frost.CastFreeze( on => Clusters.GetBestUnitForCluster(Unit.NearbyUnfriendlyUnits.Where(u=>u.SpellDistance() < 8), ClusterType.Radius, 8))
                         ),
-                    Spell.Buff("Frost Nova"),
-                    Spell.Buff("Frostjaw"),
-                    Spell.CastOnGround("Ring of Frost", loc => Me.Location, req => true, false),
-                    Spell.Buff("Cone of Cold")
+
+                    // Ice Block cast if we didn't take Cauterize
+                    Spell.BuffSelf("Ice Block",
+                        ret => SingularRoutine.CurrentWoWContext != WoWContext.Instances
+                            && !SpellManager.HasSpell("Cauterize")
+                            && StyxWoW.Me.HealthPercent < 20
+                            && !StyxWoW.Me.ActiveAuras.ContainsKey("Hypothermia")),
+
+                    Spell.BuffSelf("Incanter's Ward", req => Unit.NearbyUnitsInCombatWithMeOrMyStuff.Any()),
+                    Spell.BuffSelf("Ice Ward"),
+                    Spell.Cast("Evocation", mov => true, on => Me, ret => NeedEvocation, cancel => false),
+
+                    Dispelling.CreatePurgeEnemyBehavior("Spellsteal"),
+                    // CreateMageSpellstealBehavior(),
+
+                    Spell.Cast("Ice Barrier", on => Me, ret => Me.HasAuraExpired("Ice Barrier", 2)),
+
+                    new Throttle( TimeSpan.FromMilliseconds(6000), Spell.CastOnGround("Rune of Power", loc => Me.Location, req => !Me.IsMoving && !Me.InVehicle && !Me.HasAura("Rune of Power") && Singular.Utilities.EventHandlers.LastNoPathFailure.AddSeconds(30) < DateTime.Now, false) ),
+
+                    Spell.Buff("Nether Tempest", true, on => Me.CurrentTarget, req => true, 1),
+                    Spell.Buff("Living Bomb", true, on => Me.CurrentTarget, req => true, 0),
+                    Spell.Buff("Frost Bomb", true, on => Me.CurrentTarget, req => true, 0),
+
+                    // Spell.Cast("Alter Time", ret => StyxWoW.Me.HasAura("Icy Veins") && StyxWoW.Me.HasAura("Brain Freeze") && StyxWoW.Me.HasAura("Fingers of Frost") && StyxWoW.Me.HasAura("Invoker's Energy")),
+
+                    Spell.Cast("Mirror Image", 
+                         req => Me.GotTarget &&  (Me.CurrentTarget.IsBoss() || (Me.CurrentTarget.Elite && SingularRoutine.CurrentWoWContext != WoWContext.Instances) || Me.CurrentTarget.IsPlayer || Unit.NearbyUnitsInCombatWithMeOrMyStuff.Count() >= 3)),
+
+                    Spell.BuffSelf("Time Warp", ret => MageSettings.UseTimeWarp && NeedToTimeWarp),
+
+                    Common.CreateUseManaGemBehavior(ret => Me.ManaPercent < (SingularRoutine.CurrentWoWContext == WoWContext.Instances ? 20 : 80))
+                
+                    // , Spell.BuffSelf( "Ice Floes", req => Me.IsMoving)
                     )
                 );
         }
@@ -277,7 +236,8 @@ namespace Singular.ClassSpecific.Mage
                                          {
                                              186812,
                                              207386,
-                                             207387 //This is the one for level 85 - not sure if we need to add another at 90
+                                             207387, //This is the one for level 85 - not sure if we need to add another at 90
+                                             211363, //Level 90
                                          };
 
         static private WoWGameObject MageTable
@@ -315,47 +275,92 @@ namespace Singular.ClassSpecific.Mage
 
         public static Composite CreateUseManaGemBehavior(SimpleBooleanDelegate requirements)
         {
-            return new PrioritySelector(
-                ctx => StyxWoW.Me.BagItems.FirstOrDefault(i => i.Entry == 36799 || i.Entry == 81901),
-                new Decorator(
-                    ret => ret != null && StyxWoW.Me.ManaPercent < 100 && ((WoWItem)ret).Cooldown == 0 && requirements(ret),
-                    new Sequence(
-                        new Action(ret => Logger.Write("Using {0}", ((WoWItem)ret).Name)),
-                        new Action(ret => ((WoWItem)ret).Use())))
+            return new Throttle( 2, 
+                new PrioritySelector(
+                    ctx => StyxWoW.Me.BagItems.FirstOrDefault(i => i.Entry == 36799 || i.Entry == 81901),
+                    new Decorator(
+                        ret => ret != null && StyxWoW.Me.ManaPercent < 100 && ((WoWItem)ret).Cooldown == 0 && requirements(ret),
+                        new Sequence(
+                            new Action(ret => Logger.Write("Using {0}", ((WoWItem)ret).Name)),
+                            new Action(ret => ((WoWItem)ret).Use())
+                            )
+                        )
+                    )
                 );
         }
 
         public static Composite CreateStayAwayFromFrozenTargetsBehavior()
         {
+#if NOPE
             return new PrioritySelector(
-                ctx => Unit.NearbyUnfriendlyUnits.
-                           Where( u => u.IsFrozen() && u.Distance < Spell.MeleeRange + 3f).
-                           OrderBy(u => u.DistanceSqr).FirstOrDefault(),
+                ctx => Unit.NearbyUnfriendlyUnits
+                           .Where( u => u.IsFrozen() && Me.SpellDistance(u) < 8)
+                           .OrderBy(u => u.DistanceSqr).FirstOrDefault(),
                 new Decorator(
                     ret => ret != null && MovementManager.IsClassMovementAllowed,
                     new PrioritySelector(
-                        Disengage.CreateDisengageBehavior("Blink", Disengage.Direction.Frontwards, 20, null),
-                        Disengage.CreateDisengageBehavior("Rocket Jump", Disengage.Direction.Frontwards, 20, null),
-                        new Action(
-                            ret =>
-                            {
-                                WoWPoint moveTo =
-                                    WoWMathHelper.CalculatePointBehind(
+                        new Decorator(
+                            ret => Spell.GetSpellCooldown("Blink").TotalSeconds > 0
+                                && Spell.GetSpellCooldown("Rocket Jump").TotalSeconds > 0,
+                            new Action(
+                                ret =>
+                                {
+                                    if (Me.IsMoving && StopMoving.Type == StopMoving.StopType.Location)
+                                    {
+                                        Logger.WriteDebug(Color.LightBlue, "StayAwayFromFrozen:  looks like we are already moving away");
+                                        return RunStatus.Success;
+                                    }
+
+                                    WoWPoint moveTo = WoWMathHelper.CalculatePointBehind(
                                         ((WoWUnit)ret).Location,
                                         ((WoWUnit)ret).Rotation,
-                                        -(Spell.MeleeRange + 5f));
+                                        -Me.SpellRange(12f, (WoWUnit) ret)
+                                        );
 
-                                if (Navigator.CanNavigateFully(StyxWoW.Me.Location, moveTo))
-                                {
-                                    Logger.Write("Getting away from frozen target");
+                                    if (!Navigator.CanNavigateFully(StyxWoW.Me.Location, moveTo))
+                                    {
+                                        Logger.WriteDebug(Color.LightBlue, "StayAwayFromFrozen:  unable to navigate to point behind me {0:F1} yds away", StyxWoW.Me.Location.Distance(moveTo));
+                                        return RunStatus.Failure;
+                                    }
+
+                                    Logger.Write( Color.LightBlue, "Getting away from frozen target {0}", ((WoWUnit)ret).SafeName());
                                     Navigator.MoveTo(moveTo);
+                                    StopMoving.AtLocation(moveTo);
                                     return RunStatus.Success;
-                                }
+                                })
+                            ),
 
-                                return RunStatus.Failure;
-                            }))));
+                        new Decorator(
+                            ret => !Me.IsMoving,
+                            new PrioritySelector(
+                                Disengage.CreateDisengageBehavior("Blink", Disengage.Direction.Frontwards, 20, null),
+                                Disengage.CreateDisengageBehavior("Rocket Jump", Disengage.Direction.Frontwards, 20, null)
+                                )
+                            )
+                        )
+                    )
+                );
+             */
+#else
+            if (!SingularSettings.Instance.KiteAllow)
+                return new ActionAlwaysFail();
+
+            return new PrioritySelector(
+                ctx => Unit.NearbyUnfriendlyUnits
+                           .Where(u => u.IsRooted() && Me.SpellDistance(u) < 8) // u.IsFrozen() 
+                           .OrderBy(u => u.DistanceSqr).FirstOrDefault(),
+                new Decorator(
+                    req => req != null,
+                    new Sequence(
+                        new Action(r => Logger.WriteDebug("MageAvoidance: move away from frozen targets! requesting KITING!!!")),
+                        Kite.BeginKitingBehavior()
+                        )
+                    )
+                );
+#endif
         }
 
+        /*
         public static Composite CreateMageSpellstealBehavior()
         {
             return Spell.Cast("Spellsteal", 
@@ -363,23 +368,23 @@ namespace Singular.ClassSpecific.Mage
                 on => {
                     WoWUnit unit = GetSpellstealTarget();
                     if (unit != null)
-                        Logger.WriteDebug("Spellsteal:  found {0} with a triggering aura, cancast={1}", unit.SafeName(), SpellManager.CanCast("Spellsteal", unit));
+                        Logger.WriteDebug("Spellsteal:  found {0} with a triggering aura, cancast={1}", unit.SafeName(), Spell.CanCastHack("Spellsteal", unit));
                     return unit;
-                    }, 
-                ret => MageSettings.SpellStealTarget != WatchTargetForCast.None 
+                    },
+                ret => SingularSettings.Instance.DispelTargets != CheckTargets.None 
                 );                   
         }
 
         public static WoWUnit GetSpellstealTarget()
         {
-            if (MageSettings.SpellStealTarget == WatchTargetForCast.Current)
+            if (SingularSettings.Instance.DispelTargets == CheckTargets.Current)
             {
                 if ( Me.GotTarget && null != GetSpellstealAura( Me.CurrentTarget))
                 {
                     return Me.CurrentTarget;
                 }
             }
-            else if (MageSettings.SpellStealTarget != WatchTargetForCast.None)
+            else if (SingularSettings.Instance.DispelTargets != CheckTargets.None)
             {
                 WoWUnit target = Unit.NearbyUnfriendlyUnits.FirstOrDefault(u => Me.IsSafelyFacing(u) && null != GetSpellstealAura(u));
                 return target;
@@ -390,38 +395,36 @@ namespace Singular.ClassSpecific.Mage
 
         public static WoWAura GetSpellstealAura(WoWUnit target)
         {
-            return target.GetAllAuras().FirstOrDefault(a => a.TimeLeft.TotalSeconds > 5 && MageSettings.SpellStealList.Contains((uint)a.SpellId) && !Me.HasAura(a.SpellId));
+            return target.GetAllAuras().FirstOrDefault(a => a.TimeLeft.TotalSeconds > 5 && a.Spell.DispelType == WoWDispelType.Magic && PurgeWhitelist.Instance.SpellList.Contains(a.SpellId) && !Me.HasAura(a.SpellId));
         }
+        */
 
         public static Composite CreateMagePolymorphOnAddBehavior()
         {
-            return
-                new PrioritySelector(
-                    ctx => Unit.NearbyUnfriendlyUnits.OrderByDescending(u => u.CurrentHealth).FirstOrDefault(IsViableForPolymorph),
-                    new Decorator(
-                        ret => ret != null && Unit.NearbyUnfriendlyUnits.All(u => !u.HasMyAura("Polymorph")),
-                        new PrioritySelector(
-                            Spell.Buff("Polymorph", ret => (WoWUnit)ret))));
+            return new Decorator(
+                req => !Unit.NearbyUnfriendlyUnits.Any(u => u.HasMyAura("Polymorph")),
+                Spell.Buff("Polymorph", on => Unit.NearbyUnfriendlyUnits.Where(IsViableForPolymorph).OrderByDescending(u => u.CurrentHealth).FirstOrDefault())
+                );
         }
 
         private static bool IsViableForPolymorph(WoWUnit unit)
         {
-            if (unit.IsCrowdControlled())
-                return false;
-
-            if (unit.CreatureType != WoWCreatureType.Beast && unit.CreatureType != WoWCreatureType.Humanoid)
-                return false;
-
-            if (StyxWoW.Me.CurrentTarget != null && StyxWoW.Me.CurrentTarget == unit)
+            if (StyxWoW.Me.CurrentTargetGuid == unit.Guid)
                 return false;
 
             if (!unit.Combat)
                 return false;
 
+            if (unit.CreatureType != WoWCreatureType.Beast && unit.CreatureType != WoWCreatureType.Humanoid)
+                return false;
+
+            if (unit.IsCrowdControlled())
+                return false;
+
             if (!unit.IsTargetingMeOrPet && !unit.IsTargetingMyPartyMember)
                 return false;
 
-            if (StyxWoW.Me.GroupInfo.IsInParty && StyxWoW.Me.PartyMembers.Any(p => p.CurrentTarget != null && p.CurrentTarget == unit))
+            if (StyxWoW.Me.RaidMembers.Any(m => m.CurrentTargetGuid == unit.Guid && m.IsAlive))
                 return false;
 
             return true;
@@ -477,6 +480,207 @@ namespace Singular.ClassSpecific.Mage
             get
             {
                 return SingularRoutine.CurrentWoWContext == WoWContext.Battlegrounds && PVP.PrepTimeLeft < secsBeforeBattle && Me.HasAnyAura("Preparation", "Arena Preparation");
+            }
+        }
+
+        /// <summary>
+        /// behavior to cast appropriate Armor 
+        /// </summary>
+        /// <returns></returns>
+        public static Composite CreateMageArmorBehavior()
+        {
+            return new Throttle(TimeSpan.FromMilliseconds(500),
+                new Sequence(
+                    new Action(ret => _Armor = GetBestArmor()),
+                    new Decorator(
+                        ret => _Armor != MageArmor.None
+                            && !Me.HasMyAura(ArmorSpell(_Armor))
+                            && Spell.CanCastHack(ArmorSpell(_Armor), Me),
+                        Spell.BuffSelf(s => ArmorSpell(_Armor), ret => !Me.HasAura(ArmorSpell(_Armor)))
+                        )
+                    )
+                );
+        }
+
+        static MageArmor _Armor;
+
+        static string ArmorSpell(MageArmor s)
+        {
+            return s.ToString() + " Armor";
+        }
+
+        /// <summary>
+        /// determines the best MageArmor value to use.  Attempts to use 
+        /// user setting first, but defaults to something reasonable otherwise
+        /// </summary>
+        /// <returns>MageArmor to use</returns>
+        public static MageArmor GetBestArmor()
+        {
+            if (MageSettings.Armor == MageArmor.None)
+                return MageArmor.None;
+
+            if (StyxWoW.Me.Specialization == WoWSpec.None)
+                return MageArmor.None;
+
+            MageArmor bestArmor;
+            if (MageSettings.Armor != Settings.MageArmor.Auto)
+                bestArmor = MageSettings.Armor;
+            else if (SingularRoutine.CurrentWoWContext == WoWContext.Battlegrounds)
+                bestArmor = MageArmor.Frost;
+            else
+            {
+                if (Me.Specialization == WoWSpec.MageArcane)
+                    bestArmor = MageArmor.Mage;
+                else if (Me.Specialization == WoWSpec.MageFrost)
+                    bestArmor = MageArmor.Frost;
+                else
+                    bestArmor = MageArmor.Molten;
+            }
+
+            if (bestArmor == MageArmor.Mage && Me.Level < 80)
+                bestArmor = MageArmor.Frost;
+
+            if (bestArmor == MageArmor.Frost && Me.Level < 54)
+                bestArmor = MageArmor.Molten;
+
+            if (bestArmor == MageArmor.Molten && Me.Level < 34)
+                bestArmor = MageArmor.None;
+
+            return bestArmor;
+        }
+
+        public static Composite CreateSpellstealEnemyBehavior()
+        {
+            return Dispelling.CreatePurgeEnemyBehavior("Spellsteal");
+        }
+
+        #region Avoidance and Disengage
+
+        /// <summary>
+        /// creates a Druid specific avoidance behavior based upon settings.  will check for safe landing
+        /// zones before using WildCharge or rocket jump.  will additionally do a running away or jump turn
+        /// attack while moving away from attacking mob if behaviors provided
+        /// </summary>
+        /// <param name="nonfacingAttack">behavior while running away (back to target - instants only)</param>
+        /// <param name="jumpturnAttack">behavior while facing target during jump turn (instants only)</param>
+        /// <returns></returns>
+        public static Composite CreateMageAvoidanceBehavior(Composite nonfacingAttack = null, Composite jumpturnAttack = null)
+        {
+            Kite.CreateKitingBehavior(CreateSlowMeleeBehavior(), nonfacingAttack, jumpturnAttack);
+
+            PrioritySelector pri = new PrioritySelector();
+
+            if (SingularSettings.Instance.DisengageAllowed)
+            {
+                pri.AddChild(
+                    new Decorator(
+                        ret => Kite.IsDisengageWantedByUserSettings(),
+                        new PrioritySelector(
+                            Disengage.CreateDisengageBehavior("Blink", Disengage.Direction.Frontwards, 20, CreateSlowMeleeBehavior()),
+                            Disengage.CreateDisengageBehavior("Rocket Jump", Disengage.Direction.Frontwards, 20, CreateSlowMeleeBehavior())
+                            )
+                        )
+                    );
+            }
+
+            if (SingularSettings.Instance.KiteAllow)
+            {
+                pri.AddChild(
+                    new Decorator(
+                        ret => Kite.IsKitingWantedByUserSettings(),
+                        new Sequence(
+                            new Action( r => Logger.WriteDebug("MageAvoidance: requesting KITING!!!")),
+                            Kite.BeginKitingBehavior()
+                            )
+                        )
+                    );
+            }
+
+            if (!pri.Children.Any())
+            {
+                pri.AddChild(new ActionAlwaysFail());
+            }
+
+            return new Decorator( req => MovementManager.IsClassMovementAllowed, pri );
+        }
+
+        /*
+        private static Composite CreateSlowMeleeBehavior()
+        {
+            return new Decorator(
+                ret => Unit.NearbyUnfriendlyUnits.Any(u => u.SpellDistance() <= 8 && !u.Stunned && !u.Rooted && !u.IsSlowed()),
+                new PrioritySelector(
+                    new Decorator(
+                        ret => Me.Specialization == WoWSpec.MageFrost,
+                        Mage.Frost.CastFreeze(on => Clusters.GetBestUnitForCluster(Unit.NearbyUnfriendlyUnits.Where(u => u.SpellDistance() < 8), ClusterType.Radius, 8))
+                        ),
+                    Spell.Buff("Frost Nova"),
+                    Spell.Buff("Frostjaw"),
+                    // Spell.CastOnGround("Ring of Frost", loc => Me.Location, req => true, false),
+                    Spell.Buff("Cone of Cold")
+                    )
+                );
+        }
+        */
+
+        private static Composite CreateSlowMeleeBehavior()
+        {
+            return new PrioritySelector(
+                ctx => SafeArea.NearestEnemyMobAttackingMe,
+                new Action( ret => {
+                    if (ret == null)
+                        Logger.WriteDebug("SlowMelee: no nearest mob found");
+                    else
+                        Logger.WriteDebug("SlowMelee: crowdcontrolled: {0}, slowed: {1}", ((WoWUnit)ret).IsCrowdControlled(), ((WoWUnit)ret).IsSlowed());
+                    return RunStatus.Failure;
+                    }),
+                new Decorator(
+                    // ret => ret != null && !((WoWUnit)ret).Stunned && !((WoWUnit)ret).Rooted && !((WoWUnit)ret).IsSlowed(),
+                    ret => ret != null && !((WoWUnit)ret).IsCrowdControlled() && !((WoWUnit)ret).IsSlowed(),
+                    new PrioritySelector(
+                        new Throttle(2,
+                            new PrioritySelector(
+                                new Decorator(
+                                    ret => Me.Specialization == WoWSpec.MageFrost,
+                                    Mage.Frost.CastFreeze(on => Clusters.GetBestUnitForCluster(Unit.NearbyUnfriendlyUnits.Where(u => u.SpellDistance() < 8), ClusterType.Radius, 8))
+                                    ),
+                                Spell.CastOnGround("Ring of Frost", onUnit => (WoWUnit)onUnit, req => ((WoWUnit)req).SpellDistance() < 30, true),
+                                Spell.Cast("Frost Nova", mov => true, onUnit => (WoWUnit)onUnit, req => ((WoWUnit)req).SpellDistance() < 12, cancel => false),
+                                Spell.Cast("Frostjaw", mov => true, onUnit => (WoWUnit)onUnit, req => true, cancel => false),
+                                Spell.Cast("Cone of Cold", mov => true, onUnit => (WoWUnit)onUnit, req => true, cancel => false),
+                                Spell.Cast("Frost Bolt", mov => true, onUnit => (WoWUnit)onUnit, req => true, cancel => false),
+                                Spell.Cast("Frostfire Bolt", mov => true, onUnit => (WoWUnit)onUnit, req => true, cancel => false)
+                                )
+                            )
+                        )
+                    )
+                );
+        }
+
+        #endregion
+
+        public static bool NeedEvocation 
+        { 
+            get 
+            {
+                // never cast Evocation if we talent rune of power
+                if (HasTalent(MageTalents.RuneOfPower))
+                    return false;
+
+                // always evocate if low mana
+                if (Me.ManaPercent < 30)
+                    return true;
+
+                // for invocation talent, return true if buff has expired
+                bool hasInvocation = HasTalent(MageTalents.Invocation);
+                if ( hasInvocation)
+                    return Me.HasAuraExpired("Invoker's Energy", 1);
+
+                // if low health, return true if we are glyphed (made sure no invocation or rune of power talented chars reach here already)
+                if (Me.HealthPercent < 40)
+                    return TalentManager.HasGlyph("Evocation");
+
+                return false;
             }
         }
     }

@@ -26,13 +26,7 @@ namespace Singular.ClassSpecific.Hunter
         {
             return new PrioritySelector(
 
-                Safers.EnsureTarget(),
-
-                //Common.CreateHunterBackPedal(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
                 Spell.WaitForCastOrChannel(),
 
@@ -76,11 +70,9 @@ namespace Singular.ClassSpecific.Hunter
                             ret => Spell.UseAOE && !(Me.CurrentTarget.IsBoss() || Me.CurrentTarget.IsPlayer) && Unit.UnfriendlyUnitsNearTarget(8f).Count() >= 3,
                             new PrioritySelector(
                                 Spell.Cast("Kill Shot", onUnit => Unit.NearbyUnfriendlyUnits.FirstOrDefault(u => u.HealthPercent < 20 && u.Distance < 40 && u.InLineOfSpellSight && Me.IsSafelyFacing(u))),
-                                Spell.Buff("Serpent Sting"),
+                                Common.CreateHunterTrapBehavior("Explosive Trap", true, on => Me.CurrentTarget, ret => true),
+                                Spell.Cast("Multi-Shot"),
                                 Spell.Cast("Explosive Shot"),
-                                Spell.Cast("Black Arrow", ret => Me.CurrentTarget.TimeToDeath() > 12 ),
-                                Common.CreateHunterTrapBehavior( "Explosive Trap", true,  ret => Clusters.GetBestUnitForCluster(Unit.NearbyUnfriendlyUnits.Where(u => u.Distance < 40 && u.InLineOfSpellSight && Me.IsSafelyFacing(u)), ClusterType.Radius, 8f)),
-                                Spell.Cast("Multi-Shot", ctx => Clusters.GetBestUnitForCluster(Unit.NearbyUnfriendlyUnits.Where(u => u.Distance < 40 && u.InLineOfSpellSight && Me.IsSafelyFacing(u)), ClusterType.Radius, 8f)),
                                 Spell.Cast("Cobra Shot"),
                                 Common.CastSteadyShot(on => Me.CurrentTarget, ret => !SpellManager.HasSpell("Cobra Shot"))
                                 )
@@ -97,7 +89,7 @@ namespace Singular.ClassSpecific.Hunter
                         )
                     ),
 
-                Movement.CreateMoveToTargetBehavior(true, 35f)
+                Movement.CreateMoveToUnitBehavior( on => StyxWoW.Me.CurrentTarget, 35f, 30f)
                 );
         }
 
@@ -110,13 +102,7 @@ namespace Singular.ClassSpecific.Hunter
         {
             return new PrioritySelector(
 
-                Safers.EnsureTarget(),
-
-                //Common.CreateHunterBackPedal(),
-                Movement.CreateMoveToLosBehavior(),
-                Movement.CreateFaceTargetBehavior(),
-                Helpers.Common.CreateDismount("Pulling"),
-                Movement.CreateEnsureMovementStoppedBehavior(35f),
+                Helpers.Common.EnsureReadyToAttackFromLongRange(),
 
                 Spell.WaitForCastOrChannel(),
 
@@ -161,9 +147,7 @@ namespace Singular.ClassSpecific.Hunter
                         Spell.Cast("Cobra Shot"),
                         Common.CastSteadyShot(on => Me.CurrentTarget, ret => !SpellManager.HasSpell("Cobra Shot"))
                         )
-                    ),
-
-                Movement.CreateMoveToTargetBehavior(true, 35f)
+                    )
                 );
         }
 

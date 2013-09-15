@@ -16,6 +16,7 @@ using Styx.CommonBot;
 using Singular.Managers;
 using CommonBehaviors.Actions;
 using System.Drawing;
+using Styx.CommonBot.POI;
 
 #endregion
 
@@ -68,7 +69,11 @@ namespace Singular.ClassSpecific.Druid
             return new Decorator(
                 ret => !Spell.IsGlobalCooldown() && !Spell.IsCastingOrChannelling(),
                 new PrioritySelector(
-                    Spell.BuffSelf("Barkskin")
+                    new Sequence(
+                        Spell.BuffSelf("Barkskin"),
+                        Common.SymbBuff(Symbiosis.Dispersion, on => Me, req => Me.Stunned || Me.Fleeing || Me.Silenced ),
+                        new Action( r => Logger.Write( Color.LightCoral, "Loss of Control - BARKSKIN!!!!"))
+                        )
                     )
                 );
         }
@@ -79,47 +84,55 @@ namespace Singular.ClassSpecific.Druid
         [Behavior(BehaviorType.CombatBuffs, WoWClass.Druid, DruidAllSpecs, WoWContext.Normal)]
         public static Composite CreateDruidCombatBuffsNormal()
         {
-            return new PrioritySelector(
-                Spell.BuffSelf("Innervate", ret => StyxWoW.Me.ManaPercent <= DruidSettings.InnervateMana),
-                Spell.Cast("Barkskin", ctx => Me, ret => Me.HealthPercent < DruidSettings.Barkskin || Unit.NearbyUnitsInCombatWithMe.Count() >= 3),
-                Spell.Cast("Disorenting Roar", ctx => Me, ret => Me.HealthPercent < 40 || Unit.NearbyUnitsInCombatWithMe.Count() >= 3),
+            return new Decorator(
+                req => !Unit.IsTrivial(Me.CurrentTarget),
+                new PrioritySelector(
+                    Spell.BuffSelf("Innervate", ret => StyxWoW.Me.ManaPercent <= DruidSettings.InnervateMana),
+                    Spell.Cast("Barkskin", ctx => Me, ret => Me.HealthPercent < DruidSettings.Barkskin || Unit.NearbyUnitsInCombatWithMeOrMyStuff.Count() >= 3),
+                    Spell.Cast("Disorenting Roar", ctx => Me, ret => Me.HealthPercent < 40 || Unit.NearbyUnitsInCombatWithMeOrMyStuff.Count() >= 3),
 
-                // will hibernate only if can cast in form, or already left form for some other reason
-                Spell.Buff("Hibernate",
-                    ctx => Unit.NearbyUnitsInCombatWithMe.FirstOrDefault(
-                        u => (u.IsBeast || u.IsDragon)
-                            && (Me.HasAura("Predatory Swiftness") || (!u.IsMoving && Me.Shapeshift == ShapeshiftForm.Normal))
-                            && (!Me.GotTarget || Me.CurrentTarget.Location.Distance(u.Location) > 10)
-                            && Me.CurrentTargetGuid != u.Guid
-                            && !u.HasAnyAura("Hibernate", "Cyclone", "Entangling Roots")
-                            )
+                    // will hibernate only if can cast in form, or already left form for some other reason
+                    Spell.Buff("Hibernate",
+                        ctx => Unit.NearbyUnitsInCombatWithMeOrMyStuff.FirstOrDefault(
+                            u => (u.IsBeast || u.IsDragon)
+                                && (Me.HasAura("Predatory Swiftness") || (!u.IsMoving && Me.Shapeshift == ShapeshiftForm.Normal))
+                                && (!Me.GotTarget || Me.CurrentTarget.Location.Distance(u.Location) > 10)
+                                && Me.CurrentTargetGuid != u.Guid
+                                && !u.HasAnyAura("Hibernate", "Cyclone", "Entangling Roots")
+                                )
+                            ),
+
+                    // will root only if can cast in form, or already left form for some other reason
+                    Spell.Buff("Entangling Roots",
+                        ctx => Unit.NearbyUnitsInCombatWithMeOrMyStuff.FirstOrDefault(
+                                u => (Me.HasAura("Predatory Swiftness") || Me.Shapeshift == ShapeshiftForm.Normal || Me.Shapeshift == ShapeshiftForm.Moonkin)
+                                    && Me.CurrentTargetGuid != u.Guid
+                                    && u.SpellDistance() > 15
+                                    && !u.HasAnyAura("Hibernate", "Cyclone", "Entangling Roots", "Sunfire", "Moonfire")
+                                ),
+                        req => !Me.HasAura("Starfall")
                         ),
 
-                // will root only if can cast in form, or already left form for some other reason
-                Spell.Buff("Entangling Roots",
-                    ctx => Unit.NearbyUnitsInCombatWithMe.FirstOrDefault(
-                            u => (Me.HasAura("Predatory Swiftness") || Me.Shapeshift == ShapeshiftForm.Normal || Me.Shapeshift == ShapeshiftForm.Moonkin)
-                                && Me.CurrentTargetGuid != u.Guid
-                                && u.SpellDistance() > 15
-                                && !u.HasAnyAura("Hibernate", "Cyclone", "Entangling Roots", "Sunfire", "Moonfire")
-                            ),
-                    req => !Me.HasAura("Starfall")
-                    ),
+                    // combat buffs - make sure we have target and in range and other checks
+                    // ... to avoid wastine cooldowns
+                    new Decorator(
+                        ret => Me.GotTarget
+                            && (Me.CurrentTarget.IsPlayer || Unit.NearbyUnitsInCombatWithMeOrMyStuff.Count() >= 3)
+                            && Me.SpellDistance(Me.CurrentTarget) < ((Me.Specialization == WoWSpec.DruidFeral || Me.Specialization == WoWSpec.DruidGuardian) ? 8 : 40)
+                            && Me.CurrentTarget.InLineOfSight
+                            && Me.IsSafelyFacing(Me.CurrentTarget),
+                        new PrioritySelector(
+                            Spell.BuffSelf("Celestial Alignment", ret => Spell.GetSpellCooldown("Celestial Alignment") == TimeSpan.Zero && PartyBuff.WeHaveBloodlust),
 
-                // combat buffs - make sure we have target and in range and other checks
-                // ... to avoid wastine cooldowns
-                new Decorator(
-                    ret => Me.GotTarget
-                        && (Me.CurrentTarget.IsPlayer || Unit.NearbyUnitsInCombatWithMe.Count() >= 3)
-                        && Me.SpellDistance(Me.CurrentTarget) < ((Me.Specialization == WoWSpec.DruidFeral || Me.Specialization == WoWSpec.DruidGuardian) ? 8 : 40)
-                        && Me.CurrentTarget.InLineOfSight
-                        && Me.IsSafelyFacing(Me.CurrentTarget),
-                    new PrioritySelector(
-                        Spell.BuffSelf("Celestial Alignment", ret => Spell.GetSpellCooldown("Celestial Alignment") == TimeSpan.Zero && PartyBuff.WeHaveBloodlust),
-                        Spell.CastOnGround("Force of Nature", ret => StyxWoW.Me.CurrentTarget.Location, ret => true),
-                // to do:  time ICoE at start of eclipse
-                        Spell.BuffSelf("Incarnation: Chosen of Elune"),
-                        Spell.BuffSelf("Nature's Vigil")
+                            new Sequence( 
+                                Spell.CastOnGround("Force of Nature", ret => StyxWoW.Me.CurrentTarget.Location, ret => Me.Specialization != WoWSpec.DruidRestoration),
+                                new ActionAlwaysFail()
+                                ),
+
+                    // to do:  time ICoE at start of eclipse
+                            Spell.BuffSelf("Incarnation: Chosen of Elune"),
+                            Spell.BuffSelf("Nature's Vigil")
+                            )
                         )
                     )
                 );
@@ -136,8 +149,8 @@ namespace Singular.ClassSpecific.Druid
                 CreateRebirthBehavior(ctx => Group.Tanks.FirstOrDefault(t => !t.IsMe && t.IsDead) ?? Group.Healers.FirstOrDefault(h => !h.IsMe && h.IsDead)),
 
                 Spell.Buff("Innervate", ret => StyxWoW.Me.ManaPercent <= DruidSettings.InnervateMana),
-                Spell.Cast("Barkskin", ctx => Me, ret => Me.HealthPercent < DruidSettings.Barkskin || Unit.NearbyUnitsInCombatWithMe.Count() >= 3),
-                Spell.Cast("Disorenting Roar", ctx => Me, ret => Me.HealthPercent < 40 || Unit.NearbyUnitsInCombatWithMe.Count() >= 3),
+                Spell.Cast("Barkskin", ctx => Me, ret => Me.HealthPercent < DruidSettings.Barkskin || Unit.NearbyUnitsInCombatWithMeOrMyStuff.Count() >= 3),
+                Spell.Cast("Disorenting Roar", ctx => Me, ret => Me.HealthPercent < 40 || Unit.NearbyUnitsInCombatWithMeOrMyStuff.Count() >= 3),
 
                 // combat buffs - make sure we have target and in range and other checks
                 // ... to avoid wastine cooldowns
@@ -149,7 +162,10 @@ namespace Singular.ClassSpecific.Druid
                         && Me.IsSafelyFacing(Me.CurrentTarget),
                     new PrioritySelector(
                         Spell.BuffSelf("Celestial Alignment", ret => Spell.GetSpellCooldown("Celestial Alignment") == TimeSpan.Zero && PartyBuff.WeHaveBloodlust),
-                        Spell.CastOnGround("Force of Nature", ret => StyxWoW.Me.CurrentTarget.Location, ret => true),
+                        new Sequence(
+                            Spell.CastOnGround("Force of Nature", ret => StyxWoW.Me.CurrentTarget.Location, ret => Me.Specialization != WoWSpec.DruidRestoration),
+                            new ActionAlwaysFail()
+                            ),
                         // to do:  time ICoE at start of eclipse
                         Spell.BuffSelf("Incarnation: Chosen of Elune"),
                         Spell.BuffSelf("Nature's Vigil")
@@ -183,42 +199,95 @@ namespace Singular.ClassSpecific.Druid
 
         #region Heal
 
-        [Behavior(BehaviorType.Heal, WoWClass.Druid, WoWSpec.DruidFeral)]
-        [Behavior(BehaviorType.Heal, WoWClass.Druid, WoWSpec.DruidGuardian)]
-        public static Composite CreateDruidNonRestoHeal()
+        [Behavior(BehaviorType.Heal, WoWClass.Druid, WoWSpec.DruidFeral, WoWContext.Normal)]
+        [Behavior(BehaviorType.Heal, WoWClass.Druid, WoWSpec.DruidFeral, WoWContext.Battlegrounds)]
+        [Behavior(BehaviorType.Heal, WoWClass.Druid, WoWSpec.DruidGuardian, WoWContext.Normal)]
+        public static Composite CreateDruidNonRestoHealNormal()
         {
             return new PrioritySelector(
 
                 // defensive check first
-                Spell.BuffSelf("Survival Instincts", ret => Me.Specialization == WoWSpec.DruidFeral && Me.HealthPercent < DruidSettings.SurvivalInstinctsHealth ),
+                Spell.BuffSelf("Survival Instincts", ret => Me.Specialization == WoWSpec.DruidFeral && Me.HealthPercent < DruidSettings.SurvivalInstinctsHealth),
 
                 // keep rejuv up 
-                Spell.Cast("Rejuvenation", on => Me, 
-                    ret => Me.GetPredictedHealthPercent(true) < 95
-                        && Me.HasAuraExpired("Rejuvenation", 1) // && Me.HealthPercent < 95
-                        && (Me.Shapeshift == ShapeshiftForm.Normal || (Me.Specialization == WoWSpec.DruidGuardian && Me.ActiveAuras.ContainsKey("Heart of the Wild")))),
+                Spell.Cast("Rejuvenation", on => Me,
+                    ret =>
+                    {
+                        if (!Me.HasAuraExpired("Rejuvenation", 1))
+                            return false;
+                        if (Me.Specialization == WoWSpec.DruidGuardian && Me.HasAura("Heart of the Wild") && Me.HealthPercent < 95)
+                            return true;
+                        return !Group.MeIsTank && Me.GetPredictedHealthPercent(true) < DruidSettings.SelfRejuvenationHealth;
+                    }),
 
-                Spell.Cast("Healing Touch", on => Me, ret => Me.HealthPercent <= 80 && Me.ActiveAuras.ContainsKey("Predatory Swiftness")),
-                Spell.Cast("Healing Touch", on => Me, ret => Me.HealthPercent <= 95 && Me.GetAuraTimeLeft("Predatory Swiftness", true).TotalSeconds.Between(1, 3)),
+                Spell.Cast( "Healing Touch", on => 
+                    {
+                        WoWUnit target = null;
+                        if (Me.HasAura("Predatory Swiftness"))
+                        {
+                            // heal self if needed
+                            if (Me.HealthPercent < DruidSettings.PredSwiftnessHealingTouchHealth)
+                                target = Me;
+                            // heal others if needed
+                            else if (SingularRoutine.CurrentWoWContext == WoWContext.Battlegrounds)
+                                target = Unit.GroupMembers.Where(p => p.IsAlive && p.GetPredictedHealthPercent() < DruidSettings.PredSwiftnessPvpHeal && p.DistanceSqr < 40 * 40).FirstOrDefault();
+                            // heal anyone if buff about to expire
+                            else if (Me.GetAuraTimeLeft("Predatory Swiftness", true).TotalMilliseconds.Between(500, 2000))
+                                target = Unit.GroupMembers.Where(p => p.IsAlive && p.DistanceSqr < 40 * 40).OrderBy(k => k.GetPredictedHealthPercent()).FirstOrDefault();
 
-                Spell.Cast("Renewal", on => Me, ret => Me.HealthPercent < DruidSettings.RenewalHealth ),
-                Spell.BuffSelf("Cenarion Ward", ret => Me.HealthPercent < 85 || Unit.NearbyUnfriendlyUnits.Count(u => u.Aggro || (u.Combat && u.IsTargetingMeOrPet)) > 1),
+                            if (target != null)
+                            {
+                                Logger.WriteDebug("PredSwift Heal @ actual:{0:F1}% predict:{1:F1}% and moving:{2} in form:{3}", target.HealthPercent, target.GetPredictedHealthPercent(true), target.IsMoving, target.Shapeshift);
+                            }
+                        }
+                        return target;
+                    }) ,
 
-                CreateNaturesSwiftnessHeal( ret => Me.HealthPercent < 60),
+                Spell.Cast("Renewal", on => Me, ret => Me.HealthPercent < DruidSettings.SelfRenewalHealth),
+                Spell.BuffSelf("Cenarion Ward", ret => Me.HealthPercent < DruidSettings.SelfCenarionWardHealth),
 
-                Spell.Cast("Disorienting Roar", ret => Me.HealthPercent <= 25 && Unit.NearbyUnfriendlyUnits.Any(u => u.Aggro || (u.Combat && u.IsTargetingMeOrPet))),
-                Spell.Cast("Might of Ursoc", ret => Me.HealthPercent < 25),
+                CreateNaturesSwiftnessHeal(ret => Me.HealthPercent < DruidSettings.SelfNaturesSwiftnessHealth),
+
+                Spell.Cast("Disorienting Roar", ret => Me.HealthPercent <= DruidSettings.SelfNaturesSwiftnessHealth && Unit.NearbyUnfriendlyUnits.Any(u => u.Aggro || (u.Combat && u.IsTargetingMeOrPet))),
+                Spell.Cast("Might of Ursoc", ret => Me.HealthPercent < DruidSettings.SelfNaturesSwiftnessHealth),
 
                 // heal out of form at this point (try to Barkskin at least)
-                new Throttle( Spell.BuffSelf( "Barkskin", ret => Me.HealthPercent < DruidSettings.Barkskin)),
+                new Throttle(Spell.BuffSelf("Barkskin", ret => Me.HealthPercent < DruidSettings.Barkskin)),
 
                 // for a lowbie Feral or a Bear not serving as Tank in a group
                 new Decorator(
-                    ret => Me.HealthPercent < 40 && !SpellManager.HasSpell("Predatory Swiftness") && !Group.MeIsTank && SingularRoutine.CurrentWoWContext != WoWContext.Instances,
+                    ret => Me.HealthPercent < DruidSettings.SelfHealingTouchHealth && !SpellManager.HasSpell("Predatory Swiftness") && !Group.MeIsTank && SingularRoutine.CurrentWoWContext != WoWContext.Instances,
                     new PrioritySelector(
-                        Spell.Cast("Rejuvenation", on => Me, ret => Me.HasAuraExpired("Rejuvenation",1)),
+                        Spell.Cast("Rejuvenation", on => Me, ret => Me.HasAuraExpired("Rejuvenation", 1)),
                         Spell.Cast("Healing Touch", on => Me)
                         )
+                    )
+                );
+        }
+
+        [Behavior(BehaviorType.Heal, WoWClass.Druid, WoWSpec.DruidFeral, WoWContext.Instances )]
+        [Behavior(BehaviorType.Heal, WoWClass.Druid, WoWSpec.DruidGuardian, WoWContext.Battlegrounds)]
+        [Behavior(BehaviorType.Heal, WoWClass.Druid, WoWSpec.DruidGuardian, WoWContext.Instances)]
+        public static Composite CreateDruidNonRestoHealInstances()
+        {
+            return new PrioritySelector(
+
+                // defensive check first
+                Spell.BuffSelf("Survival Instincts", ret => Me.Specialization == WoWSpec.DruidFeral && Me.HealthPercent < DruidSettings.SurvivalInstinctsHealth),
+
+                Spell.Cast("Renewal", on => Me, ret => Me.HealthPercent < DruidSettings.SelfRenewalHealth),
+                Spell.BuffSelf("Cenarion Ward", ret => Me.HealthPercent < DruidSettings.SelfCenarionWardHealth),
+
+                CreateNaturesSwiftnessHeal(ret => Me.HealthPercent < DruidSettings.SelfNaturesSwiftnessHealth),
+
+                Spell.Cast("Might of Ursoc", ret => Me.HealthPercent < DruidSettings.SelfNaturesSwiftnessHealth),
+
+                // heal out of form at this point (try to Barkskin at least)
+                new Throttle(Spell.BuffSelf("Barkskin", ret => Me.HealthPercent < DruidSettings.Barkskin)),
+
+                new Decorator(
+                    req => !Group.AnyHealerNearby,
+                    CreateDruidNonRestoHealNormal()
                     )
                 );
         }
@@ -260,11 +329,12 @@ namespace Singular.ClassSpecific.Druid
             return new PrioritySelector(
                 new Decorator(
                     ret => !Me.HasAura("Drink") && !Me.HasAura("Food")
-                        && (Me.GetPredictedHealthPercent(true) < SingularSettings.Instance.MinHealth || (Me.Shapeshift == ShapeshiftForm.Normal && Me.GetPredictedHealthPercent(true) < 85))
-                        && SpellManager.HasSpell("Healing Touch") && SpellManager.CanCast("Healing Touch", Me, false, false),
+                        && Me.GetPredictedHealthPercent(true) < (Me.Shapeshift == ShapeshiftForm.Normal ? 85 : SingularSettings.Instance.MinHealth)
+                        && ((Me.HasAuraExpired("Rejuvenation", 1) && Spell.CanCastHack("Rejuvenation", Me)) || Spell.CanCastHack("Healing Touch", Me)),
                     new PrioritySelector(
-                        Movement.CreateEnsureMovementStoppedBehavior(),
-                        new Action(r => { Logger.WriteDebug("Druid Rest Heal @ {0:F1}% and moving:{1} in form:{2}", Me.HealthPercent, Me.IsMoving, Me.Shapeshift ); return RunStatus.Failure; }),
+                        Movement.CreateEnsureMovementStoppedBehavior( reason:"to heal"),
+                        new Action(r => { Logger.WriteDebug("Rest Heal @ actual:{0:F1}% predict:{1:F1}% and moving:{2} in form:{3}", Me.HealthPercent, Me.GetPredictedHealthPercent(true), Me.IsMoving, Me.Shapeshift ); return RunStatus.Failure; }),
+                        Spell.BuffSelf("Rejuvenation", req => !SpellManager.HasSpell("Healing Touch")),
                         Spell.Cast("Healing Touch",
                             mov => true,
                             on => Me,
@@ -273,7 +343,8 @@ namespace Singular.ClassSpecific.Druid
                         )
                     ),
 
-                Rest.CreateDefaultRestBehaviour(null, "Revive")
+                Rest.CreateDefaultRestBehaviour(null, "Revive"),
+                CreateDruidMovementBuff()
                 );
         }
 
@@ -289,29 +360,10 @@ namespace Singular.ClassSpecific.Druid
 
         public static Composite CreateRebirthBehavior(UnitSelectionDelegate onUnit)
         {
-            if (!DruidSettings.UseRebirth)
-                return new PrioritySelector();
+            if (Me.Specialization == WoWSpec.DruidGuardian)
+                return Helpers.Common.CreateCombatRezBehavior("Rebirth", on => ((WoWUnit)on).SpellDistance() < 40 && ((WoWUnit)on).InLineOfSpellSight, requirements => true);
 
-            if (onUnit == null)
-            {
-                Logger.WriteDebug("CreateRebirthBehavior: error - onUnit == null");
-                return new PrioritySelector();
-            }
-
-            return new PrioritySelector(
-                ctx => onUnit(ctx),
-                new Decorator(
-                    ret => onUnit(ret) != null && Spell.GetSpellCooldown("Rebirth") == TimeSpan.Zero,
-                    new PrioritySelector(
-                        Spell.WaitForCast(true),
-                        Movement.CreateMoveToRangeAndStopBehavior(ret => (WoWUnit)ret, range => 40f),
-                        new Decorator(
-                            ret => !Spell.IsGlobalCooldown(),
-                            Spell.Cast("Rebirth", ret => (WoWUnit)ret)
-                            )
-                        )
-                    )
-                );
+            return Helpers.Common.CreateCombatRezBehavior("Rebirth", filter => true, reqd => !Me.HasAnyAura("Nature's Swiftness", "Predatory Swiftness"));
         }
 
         public static Composite CreateFaerieFireBehavior(UnitSelectionDelegate onUnit, SimpleBooleanDelegate Required)
@@ -327,6 +379,52 @@ namespace Singular.ClassSpecific.Druid
                     )
                 );
         }
+
+        public static Decorator CreateDruidMovementBuff()
+        {
+            return new Throttle( 5,
+                new Decorator(
+                    ret => DruidSettings.UseTravelForm
+                        && !Spell.IsCastingOrChannelling() && !Spell.IsGlobalCooldown()
+                        && MovementManager.IsClassMovementAllowed
+                        && SingularRoutine.CurrentWoWContext != WoWContext.Instances
+                        && Me.IsMoving // (DateTime.Now - GhostWolfRequest).TotalMilliseconds < 1000
+                        && Me.IsAlive
+                        && !Me.OnTaxi && !Me.InVehicle && !Me.Mounted && !Me.IsOnTransport && !Me.IsSwimming && !Me.HasAnyAura("Travel Form", "Flight Form")
+                        && !Utilities.EventHandlers.IsShapeshiftSuppressed 
+                        && SpellManager.HasSpell("Cat Form")
+                        && BotPoi.Current != null
+                        && BotPoi.Current.Type != PoiType.None
+                        && BotPoi.Current.Type != PoiType.Hotspot
+                        && BotPoi.Current.Location.Distance(Me.Location) > 10
+                        && (BotPoi.Current.Location.Distance(Me.Location) < Styx.Helpers.CharacterSettings.Instance.MountDistance || (Me.IsIndoors && !Mount.CanMount()) || (Me.GetSkill(SkillLine.Riding).CurrentValue == 0))
+                        && !Me.IsAboveTheGround(),
+                    new Sequence(
+                        new Action(r => Logger.WriteDebug("DruidMoveBuff: poitype={0} poidist={1:F1} indoors={2} canmount={3} riding={4}",
+                            BotPoi.Current.Type,
+                            BotPoi.Current.Location.Distance(Me.Location),
+                            Me.IsIndoors.ToYN(),
+                            Mount.CanMount().ToYN(),
+                            Me.GetSkill(SkillLine.Riding).CurrentValue
+                            )),
+                        new PrioritySelector(
+                            new Decorator( req => Spell.CanCastHack("Travel Form", Me, false) && Me.IsOutdoors, Spell.BuffSelf( "Travel Form")),
+                            Spell.BuffSelf("Cat Form")
+                            ),
+                        Helpers.Common.CreateWaitForLagDuration()
+                        )
+                    )
+                );
+        }
+
+        public static Composite CreateMoveBehindTargetWhileProwling()
+        {
+            return new Decorator(
+                req => DruidSettings.MoveBehindTargets && Me.HasAura("Prowl"),
+                Movement.CreateMoveBehindTargetBehavior()
+                );
+        }
+        
 
         #region Symbiosis Support
 
@@ -363,7 +461,7 @@ namespace Singular.ClassSpecific.Druid
                                 else
                                 {
                                     Logger.Write("Symbiosis: we gained {0} #{1}", newSpell.Value.Name, newSpell.Value.Id);
-                                    Logger.WriteDebug("Symbiosis: CanCast {0} is {1}", newSpell.Value.Name, SpellManager.CanCast(newSpell.Value.Name, true));
+                                    Logger.WriteDebug("Symbiosis: CanCast {0} is {1}", newSpell.Value.Name, Spell.CanCastHack(newSpell.Value.Name, true));
                                 }
                                 })
 */
@@ -436,7 +534,7 @@ namespace Singular.ClassSpecific.Druid
                             return RunStatus.Failure;
 
                         // check we can cast it on target
-                        // if (!SpellManager.CanCast(spell, on(ret), false, false, true))
+                        // if (!Spell.CanCastHack(spell, on(ret), false, false, true))
                         //     return RunStatus.Failure;
 
                         Logger.Write(string.Format("Casting Symbiosis: {0} on {1}", spell.Name, on(ret).SafeName()));
@@ -453,7 +551,7 @@ namespace Singular.ClassSpecific.Druid
         }
 
         /// <summary>
-        /// replacement for SpellManager.CanCast() since that does a lookup on SpellManager.Spells and 
+        /// replacement for Spell.CanCastHack() since that does a lookup on SpellManager.Spells and 
         /// ability gained from Druid does not presently appear in that list after buff established (note: class receiving
         /// Symbiosis from Druid does get updated.)
         /// </summary>
@@ -486,7 +584,7 @@ namespace Singular.ClassSpecific.Druid
                     return false;
             }
 
-            if ((spell.CastTime != 0u || Spell.IsFunnel(spell)) && Me.IsMoving && !Spell.HaveAllowMovingWhileCastingAura())
+            if ((spell.CastTime != 0u || Spell.IsFunnel(spell)) && Me.IsMoving && !Spell.HaveAllowMovingWhileCastingAura(spell))
                 return false;
 
             if (Me.ChanneledCastingSpellId == 0)
